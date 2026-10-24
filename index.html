@@ -1256,7 +1256,8 @@ function zh(m){
     [/User already registered/i,'这个邮箱已经注册过了，直接登录就行'],[/Password should be at least/i,'密码至少要 6 位'],
     [/rate limit|too many/i,'操作太频繁，请过一会儿再试'],[/Unable to validate email|invalid format/i,'邮箱格式不对'],
     [/Identity is already linked/i,'这个 GitHub 账号已经绑定在另一个账号上了'],[/Manual linking is disabled/i,'后台没开“允许绑定”'],
-    [/Failed to fetch|NetworkError/i,'连不上服务器，请检查网络'],[/JWT expired|invalid JWT/i,'登录过期了，请重新登录']];
+    [/Failed to fetch|NetworkError/i,'连不上服务器，请检查网络'],[/duplicate key|already exists|23505/i,'这个账号名已经有人用了，换一个'],
+    [/username_check|violates check constraint/i,'账号名只能用字母、数字、下划线、点、横线，3～32 位'],[/JWT expired|invalid JWT/i,'登录过期了，请重新登录']];
   for(const [re,t] of T)if(re.test(m))return t;
   return m;
 }
@@ -1298,9 +1299,26 @@ async function signUp(email,password){
   if(j&&Array.isArray(j.identities)&&!j.identities.length)throw new Error('这个邮箱已经注册过了，直接登录就行');
   return 'confirm';
 }
-async function signIn(email,password){take(await api('/auth/v1/token?grant_type=password',{method:'POST',body:{email,password},auth:false}));}
-const recover=email=>api('/auth/v1/recover?redirect_to='+encodeURIComponent(back()),{method:'POST',body:{email},auth:false});
-async function setPassword(password){session.user=await api('/auth/v1/user',{method:'PUT',body:{password}});keep(session);}
+/* 账号名登录：没有 @ 的当账号名，先查到它对应的邮箱 */
+async function emailOf(id){
+  id=String(id||'').trim();
+  if(id.includes('@'))return id;
+  const em=await api('/rest/v1/rpc/paike_login_email',{method:'POST',body:{p_name:id},auth:false});
+  if(!em)throw new Error('没有这个账号名');
+  return em;
+}
+async function signIn(id,password){const email=await emailOf(id);take(await api('/auth/v1/token?grant_type=password',{method:'POST',body:{email,password},auth:false}));}
+const recover=async id=>api('/auth/v1/recover?redirect_to='+encodeURIComponent(back()),{method:'POST',body:{email:await emailOf(id)},auth:false});
+/* 设密码：GitHub 登录的账号也能设，设完就能用“邮箱或账号名 + 密码”登录 */
+async function setPassword(password){session.user=await api('/auth/v1/user',{method:'PUT',body:{password,data:{has_password:true}}});keep(session);}
+const hasPassword=()=>!!(meta().has_password||providers().includes('email'));
+async function getUsername(){const r=await api('/rest/v1/paike_usernames?select=username&user_id=eq.'+user().id);return r[0]?r[0].username:'';}
+async function setUsername(name){
+  name=String(name||'').trim().toLowerCase();
+  await api('/rest/v1/paike_usernames?user_id=eq.'+user().id,{method:'DELETE'});
+  if(name)await api('/rest/v1/paike_usernames',{method:'POST',body:{username:name,user_id:user().id}});
+  return name;
+}
 async function linkGitHub(){
   const j=await api('/auth/v1/user/identities/authorize?provider=github&skip_http_redirect=true&redirect_to='+encodeURIComponent(back()));
   location.href=j.url;
@@ -1324,7 +1342,7 @@ async function update(data,rev){
   return rows[0]||null;
 }
 return {enabled:()=>/^https?:$/.test(location.protocol),loggedIn:()=>!!(session&&session.access_token),handleRedirect,reloadUser,
-  signInGitHub,signUp,signIn,recover,setPassword,linkGitHub,signOut,user,providers,githubName,isAdmin,name,avatar,load,create,update,ADMIN_GITHUB};
+  signInGitHub,signUp,signIn,recover,setPassword,hasPassword,getUsername,setUsername,linkGitHub,signOut,user,providers,githubName,isAdmin,name,avatar,load,create,update,ADMIN_GITHUB};
 })();
 
 
@@ -2110,13 +2128,16 @@ const ACT={
   'cf-mine':()=>{closeModal();Sync.rev=conflict.row.rev;Sync.push();},
   'login-gh':()=>Cloud.signInGitHub(),
   'login-tab':el=>{gateMode=el.dataset.m;showGate();},
-  'login-forgot':async()=>{const em=$('#lgEmail').value.trim();if(!em)return gateMsg('先填上邮箱，再点“忘记密码”');
-    try{await Cloud.recover(em);gateMsg('重设密码的邮件已发到 '+em+'，点邮件里的链接回到这里设新密码',true);}catch(e){gateMsg(e.message);}},
+  'login-forgot':async()=>{const em=$('#lgEmail').value.trim();if(!em)return gateMsg('先填上邮箱或账号名，再点“忘记密码”');
+    try{await Cloud.recover(em);gateMsg('重设密码的邮件已发到这个账号的邮箱，点邮件里的链接回到这里设新密码',true);}catch(e){gateMsg(e.message);}},
   'acct':()=>accountModal(),
   'link-gh':async()=>{try{await Cloud.linkGitHub();}catch(e){toast(e.message);}},
   'pw-change':()=>passwordModal(),
+  'un-save':async()=>{const v=$('#unInput').value.trim();
+    if(v&&!/^[A-Za-z0-9_.-]{3,32}$/.test(v))return toast('账号名只能用字母、数字、下划线、点、横线，3～32 位');
+    try{const n=await Cloud.setUsername(v);toast(n?'账号名已设为 '+n+(Cloud.hasPassword()?'':'，再设一个密码就能用账号名登录'):'已取消账号名');accountModal();}catch(e){toast(e.message);}},
   'pw-save':async()=>{const p=$('#pw1').value,q=$('#pw2').value;if(p.length<6)return toast('密码至少 6 位');if(p!==q)return toast('两次输入的不一样');
-    try{await Cloud.setPassword(p);closeModal();toast('新密码已保存');}catch(e){toast(e.message);}},
+    try{await Cloud.setPassword(p);toast('密码已保存，现在可以用账号名或邮箱 + 密码登录');accountModal();}catch(e){toast(e.message);}},
   'logout':async()=>{if(Sync.dirty||Sync.busy){toast('还在同步，稍等几秒再退出');return Sync.push();}closeModal();await Cloud.signOut();try{localStorage.removeItem(cacheKey());}catch(e){}location.reload();},
   'first-blank':()=>{closeModal();Sync.push();toast('从空白开始：先去“班级与教室”添加班级和教室');setView({tab:'classes'});},
   'first-import':()=>{closeModal();$('#jsonFile').click();},
@@ -2285,10 +2306,10 @@ function showGate(state,err){
     <p class="note">登录后使用。每个账号的排课数据单独存在云端，别人看不到；换电脑登录同一个账号，数据还在。</p>
     ${err?'<p class="lg-msg">'+h(err)+'</p>':''}
     <button class="pri gh" data-act="login-gh">${GH_ICON}用 GitHub 登录</button>
-    <div class="or"><span>或者用邮箱</span></div>
+    <div class="or"><span>或者用邮箱 / 账号名</span></div>
     <div class="seg lg-seg"><button class="${gateMode==='login'?'on':''}" data-act="login-tab" data-m="login">登录</button><button class="${gateMode==='signup'?'on':''}" data-act="login-tab" data-m="signup">注册新账号</button></div>
     <form id="lgForm" class="lg-form">
-      <input id="lgEmail" type="email" placeholder="邮箱" autocomplete="email" required>
+      <input id="lgEmail" type="${gateMode==='signup'?'email':'text'}" placeholder="${gateMode==='signup'?'邮箱':'邮箱或账号名'}" autocomplete="${gateMode==='signup'?'email':'username'}" required>
       <input id="lgPw" type="password" placeholder="${gateMode==='signup'?'设一个密码（至少 6 位）':'密码'}" autocomplete="${gateMode==='signup'?'new-password':'current-password'}" required minlength="6">
       ${gateMode==='signup'?'<input id="lgPw2" type="password" placeholder="再输一次密码" autocomplete="new-password" required>':''}
       <button class="pri" type="submit">${gateMode==='signup'?'注册':'登录'}</button>
@@ -2315,17 +2336,20 @@ function renderAccount(){
   el.innerHTML=`<button class="acct-b" data-act="acct" title="账号设置">${av?'<img src="'+h(av)+'" alt="">':'<span class="av" style="--h:220">'+h((Cloud.name()||'?').slice(0,1))+'</span>'}
     <span class="acct-n">${h(Cloud.name())}${Cloud.isAdmin()?'<em class="tag fx">管理员</em>':''}<small>${h((Cloud.user()||{}).email||'')}</small></span></button>`;
 }
-function accountModal(){
-  const u=Cloud.user()||{},pv=Cloud.providers();
-  modal('我的账号',h(u.email||''),
-    `<div class="pf-row"><div class="pf-f"><span class="pf-l">身份</span>${Cloud.isAdmin()?'<span class="tag fx">管理员</span> 本教研室数据在这个账号名下':'普通账号（数据只有自己能看）'}</div>
-     <div class="pf-f"><span class="pf-l">邮箱登录</span>${pv.includes('email')?'<span class="tag ok">已开通</span><button class="sm" data-act="pw-change">修改密码</button>':'<span class="tag">没开通</span><button class="sm" data-act="pw-change">设一个密码（以后也能用邮箱登录）</button>'}</div>
-     <div class="pf-f"><span class="pf-l">GitHub 登录</span>${pv.includes('github')?'<span class="tag ok">已绑定 '+h(Cloud.githubName())+'</span>':'<span class="tag">没绑定</span><button class="sm pri" data-act="link-gh">绑定 GitHub</button>'}</div></div>
-     <p class="note">绑定后，用邮箱或 GitHub 哪种方式登录都是同一个账号、同一份数据。</p>`,
+async function accountModal(){
+  const u=Cloud.user()||{},pv=Cloud.providers(),pw=Cloud.hasPassword();
+  let un='';try{un=await Cloud.getUsername();}catch(e){}
+  modal('我的账号',Cloud.isAdmin()?'管理员 · 本教研室数据在这个账号名下':'普通账号 · 数据只有自己能看',
+    `<div class="pf-row">
+     <div class="pf-f"><span class="pf-l">账号名</span><input id="unInput" value="${h(un)}" placeholder="如 11445" maxlength="32" style="width:150px"><button class="sm" data-act="un-save">保存</button>${un?'<span class="tag ok">已设置</span>':''}</div>
+     <div class="pf-f"><span class="pf-l">密码</span>${pw?'<span class="tag ok">已设置</span><button class="sm" data-act="pw-change">修改密码</button>':'<span class="tag warn">还没设</span><button class="sm pri" data-act="pw-change">设一个密码</button>'}</div>
+     <div class="pf-f"><span class="pf-l">登录邮箱</span><span class="mono">${h(u.email||'—')}</span></div>
+     <div class="pf-f"><span class="pf-l">GitHub</span>${pv.includes('github')?'<span class="tag ok">已绑定 '+h(Cloud.githubName())+'</span>':'<span class="tag">没绑定</span><button class="sm pri" data-act="link-gh">绑定 GitHub</button>'}</div></div>
+     <p class="note">这几种方式登录的都是<b>同一个账号、同一份数据</b>：${pv.includes('github')?'GitHub 一键登录；':''}设了密码后，还可以在登录页输入<b>账号名</b>（或登录邮箱）+ 密码登录，适合给不方便用 GitHub 的人。</p>`,
     '<button class="ghost" data-act="logout">退出登录</button><button class="pri" data-act="close">完成</button>');
 }
 function passwordModal(){
-  modal('设置新密码','以后可以用邮箱 + 这个密码登录',
+  modal('设置密码','设好后可以用“账号名或登录邮箱 + 密码”登录',
     '<div class="lg-form"><input id="pw1" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password"><input id="pw2" type="password" placeholder="再输一次" autocomplete="new-password"></div>',
     '<button data-act="close">取消</button><button class="pri" data-act="pw-save">保存</button>');
 }
