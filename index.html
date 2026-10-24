@@ -511,7 +511,7 @@ button.is-error{animation:shake .42s cubic-bezier(.36,.07,.19,.97)}
 <div id="toast" class="toast" role="status"></div>
 <script id="saved-data" type="application/json">null</script>
 <script>
-const BUILD={"time":"2026-10-24T13:11:56.149Z","sha":"aebd5c0"};
+const BUILD={"time":"2026-10-24T13:14:21.319Z","sha":"39ee71e+"};
 /* ---- engine.js ---- */
 /* ================= 排课引擎：数据模型、次数/轮次、自动排课、固定老师同步、校验 =================
    纯逻辑，不碰页面；浏览器里是全局 Engine，node 里 require 进来测试。
@@ -562,6 +562,12 @@ function assignColors(st){
   }
 }
 /* upgrade：本机版带的数据专用升级（含具体老师名），在线版没有 */
+/* 学院的规定：相邻两个班同一间教室（1-2、3-4…），晚修批次按班号固定——号小的第一批、号大的第二批。
+   所以每间教室里的班一律按班级名单的顺序排（第 1 个 = 第一批），不让手动对调。 */
+function sortGroups(st){
+  const ord=new Map(st.classes.map((c,i)=>[c.id,i]));
+  for(const g of st.groups)g.classIds.sort((a,b)=>(ord.get(a)??1e9)-(ord.get(b)??1e9));
+}
 function migrate(st,upgrade){
   if(upgrade)upgrade(st,Engine);
   st.designate=st.designate||{};
@@ -570,10 +576,8 @@ function migrate(st,upgrade){
   assignColors(st);
   for(const p of st.pairRules||[])for(const n of [p.a,p.b])if(n&&!st.designate[n])st.designate[n]=p.groupId;
   delete st.pairRules;
-  if(st.classes.some(c=>'batch' in c)){
-    for(const g of st.groups)g.classIds.sort((a,b)=>((cls(st,a)||{}).batch||1)-((cls(st,b)||{}).batch||1));
-    for(const c of st.classes)delete c.batch;
-  }
+  if(st.classes.some(c=>'batch' in c))for(const c of st.classes)delete c.batch;
+  sortGroups(st);
   return st;
 }
 
@@ -586,7 +590,7 @@ function assignClasses(st,name,ids,kind){
   const map=kind==='fixed'?st.fixed:st.designate;
   if(!ids.length){if(kind==='fixed')map[name]=null;else delete map[name];return [];}
   const same=st.groups.find(g=>g.classIds.length===ids.length&&ids.every(id=>g.classIds.includes(id)));
-  if(same){same.classIds=ids.slice();map[name]=same.id;return [];}
+  if(same){same.classIds=ids.slice();sortGroups(st);map[name]=same.id;return [];}
   const touched=st.groups.filter(g=>g.classIds.some(id=>ids.includes(id)));
   const first=st.groups.find(g=>g.classIds.includes(ids[0]));
   const order=[first,...touched.filter(g=>g!==first)];
@@ -600,6 +604,7 @@ function assignClasses(st,name,ids,kind){
   }
   st.groups=st.groups.filter(g=>!touched.includes(g));
   st.groups.splice(Math.min(at,st.groups.length),0,...made);
+  sortGroups(st);
   map[name]=first.id;
   const cleared=[];
   const changed=new Set(touched.map(g=>g.id));
@@ -671,6 +676,7 @@ function ensureWeek(st,date){
 }
 /* 设置改了以后，把 fromDate 及以后的周同步到新设置 */
 function syncConfig(st,fromDate){
+  sortGroups(st);
   for(const w of st.weeks)if(w.date>=fromDate)syncWeekRows(st,w);
 }
 
@@ -737,10 +743,12 @@ function generate(st,dates,opt={}){
       if(tm){const row=freeRows.find(r=>r.gid===tm.gid&&!taken(r));if(row)reserved.set(row,n);continue;}
       const pf=preferOf(st,n);
       if(pf){
-        /* 尽量不占“轮到时带”的人马上要用的组 */
-        const soon=new Set(pool.slice(0,freeRows.length+2).filter(x=>x!==n&&teamOf(st,x)).map(x=>teamOf(st,x).gid));
-        const ok=freeRows.filter(r=>!taken(r)&&rowMatches(st,r,pf));
-        const row=shuffle(ok.filter(r=>!soon.has(r.gid)),rng)[0]||shuffle(ok,rng)[0];
+        /* 不占“轮到时带”的人的教室：那间教室的指定老师里有人比我先该上（次数不比我多、本周能上），
+           就把教室留给他，我这周不排、下周优先（指定老师只能进那一间，我还有别的可能） */
+        const reservedFor=gid=>pool.some(x=>x!==n&&teamOf(st,x)&&teamOf(st,x).gid===gid&&(cnt[x]||0)<=(cnt[n]||0)
+          &&!teamOf(st,x).names.some(y=>y!==x&&(used.has(y)||[...reserved.values()].includes(y))));
+        const ok=freeRows.filter(r=>!taken(r)&&rowMatches(st,r,pf)&&!reservedFor(r.gid));
+        const row=shuffle(ok,rng)[0];
         if(row)reserved.set(row,n);continue;}
       normals.push(n);
     }
@@ -770,7 +778,9 @@ function check(st){
       if(!t)add(w.date,r.teacher+' 不在老师名单里');
       else if(t.status==='exclude')add(w.date,r.teacher+' 在不排名单里'+(t.reason?'（'+t.reason+'）':''));
       else if(t.status==='rotate'&&cnt[r.teacher]>minCnt){
-        const behind=rotNow.filter(n=>cnt[n]===minCnt&&!seen[n]&&!w.rows.some(x=>x.teacher===n)&&!preferOf(st,n)&&!unavailable(st,n,w.date));
+        const behind=rotNow.filter(n=>cnt[n]===minCnt&&!seen[n]&&!w.rows.some(x=>x.teacher===n)&&!preferOf(st,n)&&!unavailable(st,n,w.date)
+          /* 同一间教室指定的搭档这周已经在上：他只能等下周，不算插队 */
+          &&!(teamOf(st,n)&&teamOf(st,n).names.some(y=>y!==n&&w.rows.some(x=>x.teacher===y))));
         if(behind.length)add(w.date,r.teacher+' 这是第 '+(cnt[r.teacher]+1)+' 轮，还有人第 '+(minCnt+1)+' 轮没上（'+behind.slice(0,4).join('、')+(behind.length>4?'…':'')+'）');
       }
       const tm=teamOf(st,r.teacher);
@@ -896,7 +906,7 @@ function noticeText(st,dates){
   return out.join('\n').trim();
 }
 
-return {BATCH,ymd,parse,addDays,md,clone,monthDates,teacher,group,cls,sortedWeeks,weekOf,namesIn,groupView,
+return {sortGroups,BATCH,ymd,parse,addDays,md,clone,monthDates,teacher,group,cls,sortedWeeks,weekOf,namesIn,groupView,
   tally,roundMap,hoursMap,weekHours,rowHours,assignColors,COLOR_SLOTS,syncWeekRows,syncConfig,ensureWeek,applyFixed,generate,check,groupLabel,setFixed,
   unassignedFixed,freeGroups,queue,sheetRows,noticeText,teamOf,migrate,assignClasses,preferOf,rowMatches,unavailable,clearMonths,templatePlan,roundSheets,ROUND_NOTES,normName};
 })();
