@@ -491,6 +491,17 @@ button.is-error{animation:shake .42s cubic-bezier(.36,.07,.19,.97)}
 .tb-r>button:not(.pri){padding:7px 12px}
 @media(max-width:1180px){.toolbar.tb3{grid-template-columns:1fr}}
 
+/* 同步与版本标签（参考夜夜小组制加分助手）：左下角“云端 v版本 · 核对于 时间”可点击立即核对；下面一行是网页版本 */
+.savedot[data-act]{cursor:pointer;border-radius:8px;padding:2px 4px;margin:-2px -4px;transition:background .2s}
+.savedot[data-act]:hover{background:var(--accbg)}
+.ver{font-size:11.5px;color:var(--mute);opacity:.85;cursor:pointer;width:max-content;border-radius:8px;padding:1px 6px;margin-left:-6px;transition:background .2s,color .2s}
+.ver:hover{background:var(--accbg);opacity:1}
+.ver.new{color:#fff;background:var(--acc);opacity:1;font-weight:600;animation:pulse .9s ease-in-out 3}
+.cf-tab{width:100%;border-collapse:collapse;font-size:13.5px;margin:4px 0 10px}
+.cf-tab th,.cf-tab td{border:1px solid var(--line);padding:6px 8px;text-align:left}
+.cf-tab th{background:var(--accbg)}
+.cf-diff{margin:4px 0 8px 18px;padding:0;font-size:13.5px;max-height:200px;overflow:auto}
+
 </style>
 </head>
 <body>
@@ -500,6 +511,7 @@ button.is-error{animation:shake .42s cubic-bezier(.36,.07,.19,.97)}
 <div id="toast" class="toast" role="status"></div>
 <script id="saved-data" type="application/json">null</script>
 <script>
+const BUILD={"time":"2026-10-24T13:11:56.149Z","sha":"aebd5c0"};
 /* ---- engine.js ---- */
 /* ================= 排课引擎：数据模型、次数/轮次、自动排课、固定老师同步、校验 =================
    纯逻辑，不碰页面；浏览器里是全局 Engine，node 里 require 进来测试。
@@ -1362,13 +1374,15 @@ const avatar=()=>meta().avatar_url||'';
 
 /* 数据：一个账号一行；rev 对不上说明另一台设备先改过 */
 async function load(){const rows=await api('/rest/v1/paike_data?select=data,rev,updated_at&user_id=eq.'+user().id);return rows[0]||null;}
+/* 只取版本号和保存时间（核对云端有没有新版本时用，不下载整份数据） */
+async function head(){const rows=await api('/rest/v1/paike_data?select=rev,updated_at&user_id=eq.'+user().id);return rows[0]||null;}
 async function create(data){const rows=await api('/rest/v1/paike_data',{method:'POST',body:{user_id:user().id,data,rev:1},headers:{Prefer:'return=representation'}});return rows[0];}
 async function update(data,rev){
   const rows=await api('/rest/v1/paike_data?user_id=eq.'+user().id+'&rev=eq.'+rev,{method:'PATCH',body:{data,rev:rev+1,updated_at:new Date().toISOString()},headers:{Prefer:'return=representation'}});
   return rows[0]||null;
 }
 return {enabled:()=>/^https?:$/.test(location.protocol),loggedIn:()=>!!(session&&session.access_token),handleRedirect,reloadUser,
-  signInGitHub,signUp,signIn,recover,setPassword,hasPassword,getUsername,setUsername,linkGitHub,signOut,user,providers,githubName,isAdmin,name,avatar,load,create,update,ADMIN_GITHUB};
+  signInGitHub,signUp,signIn,recover,setPassword,hasPassword,getUsername,setUsername,linkGitHub,signOut,user,providers,githubName,isAdmin,name,avatar,load,head,create,update,ADMIN_GITHUB};
 })();
 
 
@@ -1404,37 +1418,128 @@ let st=loadState();
 const undo=[],redo=[];
 let flashKeys=new Set();
 const hhmm=()=>new Date().toLocaleTimeString().slice(0,5);
-function setStatus(t,bad){const d=$('#savedot');if(!d)return;d.classList.toggle('bad',!!bad);d.classList.remove('pulse');void d.offsetWidth;d.classList.add('pulse');d.querySelector('span').textContent=t;}
+const p2=n=>String(n).padStart(2,'0');
+const stamp=(t,sec=true)=>{if(!t)return '—';const d=new Date(t);return `${p2(d.getMonth()+1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`+(sec?':'+p2(d.getSeconds()):'');};
+/* 这台设备的名字：系统 · 浏览器 · 4 位随机码（存在浏览器里），保存时写进数据，冲突时能看出是哪台改的 */
+const DEVICE=(()=>{let id=store.get('paike-device');if(!id){id=Math.random().toString(36).slice(2,6);store.set('paike-device',id);}
+  const u=navigator.userAgent,os=/Windows/.test(u)?'Windows':/Android/.test(u)?'安卓':/iPhone|iPad/.test(u)?'iPhone/iPad':/Mac/.test(u)?'Mac':/Linux/.test(u)?'Linux':'设备';
+  const br=/MicroMessenger/.test(u)?'微信':/Edg\//.test(u)?'Edge':/Chrome\//.test(u)?'Chrome':/Firefox\//.test(u)?'Firefox':/Safari\//.test(u)?'Safari':'浏览器';
+  return os+' · '+br+' · '+id;})();
+function setStatus(t,bad,tip){const d=$('#savedot');if(!d)return;d.classList.toggle('bad',!!bad);d.classList.remove('pulse');void d.offsetWidth;d.classList.add('pulse');d.querySelector('span').textContent=t;d.title=tip||'';}
 function save(){
-  st.savedAt=new Date().toISOString();
-  if(ONLINE){if(Cloud.loggedIn())store.set(cacheKey(),JSON.stringify(st));Sync.schedule();return;}
+  st.savedAt=new Date().toISOString();st.savedBy=DEVICE;
+  if(ONLINE){if(Cloud.loggedIn()){store.set(cacheKey(),JSON.stringify(st));keepMeta(true);}Sync.schedule();return;}
   store.set(KEY,JSON.stringify(st));setStatus('已自动保存 '+hhmm());
 }
-/* 云端同步：改动后 1.2 秒推上去；rev 对不上就是另一台设备先改过，问用哪一份 */
-const Sync={rev:0,ready:false,timer:0,busy:false,again:false,dirty:false,
-  schedule(){if(!this.ready||!Cloud.loggedIn())return;this.dirty=true;setStatus('有改动，正在准备同步…');clearTimeout(this.timer);this.timer=setTimeout(()=>this.push(),1200);},
+/* 本机缓存的“底稿版本”：缓存是从云端第几版改来的、有没有还没传上去的改动。
+   刷新或断网后重新打开时靠它判断：直接补传，还是先问用哪一份，不会悄悄丢掉本机改动。 */
+const metaKey=()=>cacheKey()+'-meta';
+function keepMeta(dirty){if(ONLINE&&Cloud.loggedIn())store.set(metaKey(),JSON.stringify({rev:Sync.rev,dirty:!!dirty}));}
+/* 云端同步（参考“夜夜小组制加分助手”）：
+   - 改动 1.2 秒后上传；上传时带上底稿版本号 rev，云端版本号不一样就拒收（另一台设备先改过），弹窗让用户选，不会互相覆盖。
+   - 切回页面、窗口获得焦点、联网、页面开着每 30 秒，各核对一次云端版本号：本机没有未上传改动就自动换成云端新版；有改动就先上传，冲突时弹窗。
+   - 左下角显示“云端 v版本号 · 核对于 时间”，鼠标停上去看云端保存时间和设备。 */
+const Sync={rev:0,ready:false,timer:0,busy:false,again:false,dirty:false,checking:false,conflicted:false,pendingApply:false,
+  checkedAt:0,cloudAt:null,cloudBy:'',
+  schedule(){if(!this.ready||!Cloud.loggedIn())return;this.dirty=true;
+    if(this.conflicted){setStatus('同步冲突 · 改动先存在本机，点这里处理',true);return;}
+    setStatus('有改动，正在准备同步…');clearTimeout(this.timer);this.timer=setTimeout(()=>this.push(),1200);},
+  ok(){setStatus('云端 v'+this.rev+' · 核对于 '+stamp(this.checkedAt),false,
+    '云端第 '+this.rev+' 版，保存于 '+stamp(this.cloudAt)+'（'+(this.cloudBy||'未知设备')+'）\n本机：'+DEVICE+'\n点一下立即核对云端最新版');},
   async push(){
+    if(this.conflicted)return;
     if(this.busy){this.again=true;return;}
     this.busy=true;this.dirty=false;clearTimeout(this.timer);setStatus('正在同步到云端…');
     try{
       const row=this.rev?await Cloud.update(st,this.rev):await Cloud.create(st);
-      if(!row){this.busy=false;return conflict();}
-      this.rev=row.rev;setStatus('已同步到云端 '+hhmm());
+      if(!row){this.busy=false;this.dirty=true;keepMeta(true);return conflict();}
+      Object.assign(this,{rev:row.rev,cloudAt:row.updated_at,cloudBy:DEVICE,checkedAt:Date.now()});
+      keepMeta(this.dirty);this.ok();
     }catch(e){
-      this.dirty=true;setStatus(e.offline?'连不上网：改动先存在本机，联网后自动同步':'同步没成功：'+e.message,true);
+      this.dirty=true;keepMeta(true);setStatus(e.offline?'连不上网：改动先存在本机，联网后自动同步':'同步没成功：'+e.message,true);
       this.timer=setTimeout(()=>this.push(),15000);
     }
     this.busy=false;if(this.again){this.again=false;this.push();}
+  },
+  async check(manual){
+    if(!this.ready||!Cloud.loggedIn()||this.checking)return;
+    if(this.conflicted){if(manual)conflict();return;}
+    if(this.busy||this.dirty){if(this.dirty&&!this.busy)this.push();else if(manual)toast('正在同步，稍后再核对');return;}
+    this.checking=true;
+    try{
+      const hd=await Cloud.head();this.checkedAt=Date.now();
+      if(!hd){this.rev=0;this.push();}
+      else if(hd.rev===this.rev){this.cloudAt=hd.updated_at;this.ok();if(manual)toast('已是云端最新版（v'+this.rev+'）');}
+      else if(this.dirty){this.push();}
+      else if(!safeNow()){this.pendingApply=true;setStatus('云端有新版本，等你操作完自动换上',false);}
+      else{const row=await Cloud.load();applyRemote(row,'已换成 '+(row.data.savedBy||'另一台设备')+' 在 '+stamp(row.updated_at,false)+' 保存的版本（v'+row.rev+'）');}
+    }catch(e){setStatus(e.offline?'连不上网：暂时无法核对云端，改动先存在本机':'核对云端没成功：'+e.message,true);}
+    this.checking=false;
   }};
+/* 正在拖动、弹窗开着、正在输入时不替换数据，等操作完再换 */
+const safeNow=()=>$('#modal').hidden&&!drag&&!document.body.classList.contains('is-dragging')&&!(document.activeElement&&/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName));
+function applyRemote(row,msg){
+  undo.push(JSON.stringify(st));if(undo.length>60)undo.shift();
+  st=E.migrate(row.data,UPGRADE);
+  Object.assign(Sync,{rev:row.rev,cloudAt:row.updated_at,cloudBy:row.data.savedBy||'',checkedAt:Date.now(),dirty:false,conflicted:false,pendingApply:false});
+  store.set(cacheKey(),JSON.stringify(st));keepMeta(false);render();Sync.ok();if(msg)toast(msg);
+}
+/* 两份数据哪里不一样：逐周逐间教室比老师，再比老师名单和班级 */
+function diffList(a,b){
+  const out=[],nm=x=>x||'（空）';
+  const dates=[...new Set([...(a.weeks||[]),...(b.weeks||[])].map(w=>w.date))].sort();
+  for(const d of dates){
+    const wa=(a.weeks||[]).find(w=>w.date===d),wb=(b.weeks||[]).find(w=>w.date===d);
+    if(!wa||!wb){out.push(`${d.slice(5)}：${wa?'只有本机排了':'只有云端排了'}`);continue;}
+    if(!!wa.skip!==!!wb.skip){out.push(`${d.slice(5)}：停课设置不同`);continue;}
+    const rooms=[...new Set([...wa.rows,...wb.rows].map(r=>r.room||r.b1))];
+    for(const rm of rooms){const ra=wa.rows.find(r=>(r.room||r.b1)===rm),rb=wb.rows.find(r=>(r.room||r.b1)===rm);
+      const ta=ra&&ra.teacher,tb=rb&&rb.teacher;if(ta!==tb)out.push(`${d.slice(5)} ${rm}：本机 ${nm(ta)}，云端 ${nm(tb)}`);}
+  }
+  const ta=(a.teachers||[]).map(t=>t.name).join('、'),tb=(b.teachers||[]).map(t=>t.name).join('、');
+  if(ta!==tb)out.push('老师名单不同');
+  if(JSON.stringify(a.groups)!==JSON.stringify(b.groups)||JSON.stringify(a.classes)!==JSON.stringify(b.classes))out.push('班级或教室设置不同');
+  return out;
+}
 async function conflict(){
   let row=null;try{row=await Cloud.load();}catch(e){}
-  if(!row){Sync.rev=0;return Sync.push();}
-  modal('云端有更新的版本','另一台电脑或另一个浏览器在 '+new Date(row.updated_at).toLocaleString()+' 改过排课。',
-    '<p>要用哪一份？另一份会被替换掉（选错了可以点“撤销”找回本机这份）。</p>',
-    `<button data-act="cf-cloud">用云端的</button><button class="pri" data-act="cf-mine">用我现在这份（覆盖云端）</button>`);
+  if(!row){Sync.conflicted=false;Sync.rev=0;return Sync.push();}
+  Sync.conflicted=true;clearTimeout(Sync.timer);
+  setStatus('同步冲突 · 点这里处理',true,'本机和云端都改过，上传已暂停，选好用哪一份后继续');
+  const diff=diffList(st,row.data),more=diff.length>8?`<li>……共 ${diff.length} 处不同</li>`:'';
+  modal('两台设备都改过排课','本机和云端各有一份不同的修改，上传已暂停，不会自动覆盖任何一份',
+    `<table class="cf-tab"><tr><th></th><th>本机这份</th><th>云端这份</th></tr>
+      <tr><td>版本</td><td>基于 v${Sync.rev}，有没上传的改动</td><td>v${row.rev}</td></tr>
+      <tr><td>保存时间</td><td>${stamp(st.savedAt)}</td><td>${stamp(row.updated_at)}</td></tr>
+      <tr><td>设备</td><td>${h(st.savedBy||DEVICE)}</td><td>${h(row.data.savedBy||'未知设备')}</td></tr></table>
+    ${diff.length?`<p><b>不一样的地方：</b></p><ul class="cf-diff">${diff.slice(0,8).map(x=>'<li>'+h(x)+'</li>').join('')}${more}</ul>`:'<p>排课内容一样，只是保存时间不同，选哪份都行。</p>'}
+    <p class="warns">建议先点“下载本机备份”留一份，再选。没选中的那份会被替换（本机这份也能用“撤销”找回）。</p>`,
+    `<button data-act="cf-backup">下载本机备份</button><button data-act="cf-cloud">用云端的</button><button class="pri" data-act="cf-mine">用本机这份（覆盖云端）</button>`);
   conflict.row=row;
 }
 addEventListener('beforeunload',e=>{if(ONLINE&&(Sync.dirty||Sync.busy)){e.preventDefault();e.returnValue='';}});
+/* 网页版本：打包时间 + 源码提交号。在线版打开时、切回页面时、每 5 分钟看一次 version.json，有新版本且没在操作就自动刷新 */
+const Ver={latest:null,
+  label(){if(typeof BUILD==='undefined')return '开发版';return this.latest?'有新版本 · 点这里刷新':'版本 '+stamp(BUILD.time,false);},
+  tip(){if(typeof BUILD==='undefined')return '';return '网页版本：发布于 '+stamp(BUILD.time)+'，源码 '+(BUILD.sha||'—')+(this.latest?'\n新版本：发布于 '+stamp(this.latest.time)+'，源码 '+this.latest.sha:'')+(ONLINE?'\n点一下检查新版本':'');},
+  show(){const el=$('#ver');if(el){el.textContent=this.label();el.title=this.tip();el.classList.toggle('new',!!this.latest);}},
+  canReload:()=>!Sync.dirty&&!Sync.busy&&!Sync.conflicted&&safeNow(),
+  async check(manual){
+    if(!ONLINE||typeof BUILD==='undefined')return manual&&toast(typeof BUILD==='undefined'?'开发版，没有版本号':'本机版不联网检查更新；这份发布于 '+stamp(BUILD.time,false));
+    try{const r=await fetch('version.json?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw 0;const v=await r.json();
+      if(v.time>BUILD.time){this.latest=v;this.show();if(this.canReload())location.reload();}
+      else if(manual)toast('已是最新版本（发布于 '+stamp(BUILD.time,false)+'）');
+    }catch(e){if(manual)toast('检查新版本没成功，稍后再试');}
+  }};
+if(ONLINE){
+  const wake=()=>{if(document.hidden)return;Sync.check();Ver.check();};
+  document.addEventListener('visibilitychange',wake);addEventListener('focus',()=>Sync.check());
+  addEventListener('online',()=>{if(Sync.dirty)Sync.push();else Sync.check();});
+  setInterval(()=>{if(!document.hidden)Sync.check();},30000);
+  setInterval(()=>{if(!document.hidden)Ver.check();},300000);
+  /* 等操作完：有待换上的云端新版或新网页版本时，每 2 秒看一次能不能换 */
+  setInterval(()=>{if(Sync.pendingApply&&safeNow()){Sync.pendingApply=false;Sync.check();}if(Ver.latest&&Ver.canReload())location.reload();},2000);
+}
 function commit(fn,msg,flash){
   undo.push(JSON.stringify(st));if(undo.length>60)undo.shift();redo.length=0;
   fn();save();if(flash)flashKeys=new Set(flash);render();if(msg)toast(msg);
@@ -1508,7 +1613,8 @@ function mountShell(){
   <aside class="side" aria-label="导航">
     <div class="brand"><svg class="logo" viewBox="0 0 34 34" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs><rect x="3" y="5" width="28" height="26" rx="7" fill="url(#lg)"/><rect x="9" y="2" width="3" height="7" rx="1.5" fill="#8a93a5"/><rect x="22" y="2" width="3" height="7" rx="1.5" fill="#8a93a5"/><g fill="rgba(255,255,255,.9)"><rect x="8" y="14" width="5" height="4" rx="1"/><rect x="15" y="14" width="5" height="4" rx="1"/><rect x="8" y="21" width="5" height="4" rx="1"/><rect x="15" y="21" width="5" height="4" rx="1"/></g><circle class="led" cx="25" cy="23" r="2.4" fill="#ffd66b"/></svg><div>华夏教研室<small>晚修排课系统</small></div></div>
     <nav id="nav"></nav>
-    <div class="side-foot">${ONLINE?'<div class="acct" id="acct"></div>':''}<div class="savedot" id="savedot"><i></i><span>${ONLINE?'未登录':st.savedAt?'已自动保存':'数据存在本机'}</span></div>
+    <div class="side-foot">${ONLINE?'<div class="acct" id="acct"></div>':''}<div class="savedot" id="savedot"${ONLINE?' data-act="sync-check" role="button" tabindex="0"':''}><i></i><span>${ONLINE?'未登录':st.savedAt?'已自动保存':'数据存在本机'}</span></div>
+      <div class="ver" id="ver" data-act="ver" role="button" tabindex="0"></div>
       <div class="themes" id="themes" role="group" aria-label="外观"><button type="button" data-theme-set="auto">自动</button><button type="button" data-theme-set="light">浅色</button><button type="button" data-theme-set="dark">深色</button></div>
       <div>${ONLINE?'在线版 · 数据存在云端，按账号分开':'离线可用 · 纯本地运行'}</div></div>
   </aside>
@@ -1766,16 +1872,24 @@ function clsOptions(cur,self,allowNone){
     return `<option value="${c.id}" ${c.id===cur?'selected':''}>${h(c.name)}${who.length?' · '+h(who.join('、')):''}</option>`;
   }).join('');
 }
+/* 选教室：每个选项是一整间教室（学院固定的两个相邻班），后面写现在谁带 */
+function roomOptions(cur,self){
+  return '<option value="">— 待分配 —</option>'+st.groups.map(g=>{
+    const who=holdersOf(g.id).filter(n=>n!==self);
+    return `<option value="${g.id}" ${g.id===cur?'selected':''}>${h(g.room||'未定教室')} · ${h(E.groupLabel(st,g.id)||'（空）')}${who.length?' · 现在 '+h(who.join('、')):''}</option>`;
+  }).join('');
+}
 function assignRow(name,kind){
   const gid=kind==='fixed'?st.fixed[name]:(st.designate||{})[name];
   const g=gid&&E.group(st,gid);const ids=g?g.classIds:[];
   const t=E.teacher(st,name)||{};
+  const cn=id=>{const c=E.cls(st,id);return c?h(c.name):'';};
   return `<tr><td><span class="av" style="${tc(name)}">${h(name.slice(-2))}</span></td>
     <td><b>${h(name)}</b><div class="note">${h(t.reason||'')}</div></td>
     <td>${kind==='fixed'?'<span class="tag fx">每周固定</span>':'<span class="tag acc">轮到时带</span>'}</td>
-    <td><select data-act="as-cls" data-n="${h(name)}" data-k="${kind}" data-p="0">${!ids.length?'<option value="" selected>— 待分配 —</option>':''}${clsOptions(ids[0],name,false)}</select></td>
-    <td><select data-act="as-cls" data-n="${h(name)}" data-k="${kind}" data-p="1">${clsOptions(ids[1]||'',name,true)}</select></td>
-    <td class="mono">${g?h(g.room||'未定'):'—'}</td>
+    <td><select class="room-sel" data-act="as-grp" data-n="${h(name)}" data-k="${kind}">${roomOptions(gid,name)}</select></td>
+    <td>${ids[0]?cn(ids[0]):'<span class="note">—</span>'}</td>
+    <td>${ids[1]?cn(ids[1]):ids[0]?'<span class="note">（只有一节）</span>':'<span class="note">—</span>'}</td>
     <td>${kind==='designate'?`<button class="sm ghost" data-act="des-del" data-n="${h(name)}">移除</button>`:''}</td></tr>`;
 }
 function pageAssign(){
@@ -1783,13 +1897,13 @@ function pageAssign(){
   const fixedT=st.teachers.filter(t=>t.status==='fixed');
   const desT=Object.keys(st.designate||{}).filter(n=>(E.teacher(st,n)||{}).status==='rotate');
   const canDes=st.teachers.filter(t=>t.status==='rotate'&&!(st.designate||{})[t.name]);
-  return pageHead('设置 · 分配','老师与分配','给老师自由选 1～2 个班：选的两个班就共用一间教室，先上的 19:10、后上的 20:00。原来跟它们一组的班会自动重新配对，课表跟着更新。')+
+  return pageHead('设置 · 分配','老师与分配','给老师选一间教室。按学院的固定表，相邻两个班同一间教室（1-2、3-4……，15 班单独），号小的班第一批 19:10、号大的第二批 20:00。哪两个班一间教室在“班级与教室”里设，一般开学定好就不动。')+
   `<div class="split wide-r"><div class="card"><div class="card-h"><h2>班级分配</h2><span class="sub">固定老师每周都带；“轮到时带”的老师按轮换顺序排到时带这些班</span></div>
-  <div class="tbl-wrap"><table class="assign"><thead><tr><th></th><th>老师</th><th>方式</th><th>第一节 ${TM(0)}</th><th>第二节 ${TM(1)}</th><th>教室</th><th></th></tr></thead><tbody>
+  <div class="tbl-wrap"><table class="assign"><thead><tr><th></th><th>老师</th><th>方式</th><th>带哪间教室</th><th>第一批 ${TM(0)}</th><th>第二批 ${TM(1)}</th><th></th></tr></thead><tbody>
   ${fixedT.map(t=>assignRow(t.name,'fixed')).join('')}${desT.map(n=>assignRow(n,'designate')).join('')}
   </tbody></table></div>
   <div class="row add-row"><select id="desNew">${canDes.map(t=>`<option>${h(t.name)}</option>`).join('')}</select><button data-act="des-add">＋ 给轮换老师指定班级</button>
-    <span class="note">同一组班指定了两位老师时，一周一人，排在前后两周。</span></div></div>
+    <span class="note">“轮到时带”的老师照常排队，轮到时进自己的教室；同一间教室指定了两位时，一周只排一位。</span></div></div>
   <div class="card"><div class="card-h"><h2>老师名单</h2><span class="sub">轮换 ${st.teachers.filter(t=>t.status==='rotate').length} 人 · 固定 ${fixedT.length} 人 · 不排 ${st.teachers.filter(t=>t.status==='exclude').length} 人</span></div>
   <div class="tbl-wrap"><table><thead><tr><th></th><th>姓名</th><th>身份</th><th>说明</th><th title="新加入的老师可以设起始次数，免得一下子连排好几周">起始次数</th><th>已上课时</th><th></th></tr></thead><tbody>
   ${st.teachers.map((t,k)=>`<tr><td><span class="av" style="${tc(t.name)}">${h(t.name.slice(-2))}</span></td><td><b>${h(t.name)}</b></td>
@@ -1808,19 +1922,18 @@ function pageClasses(){
   const used=new Set(st.groups.map(g=>g.room));
   const anyCls=(cur,k,p)=>`<select data-act="g-cls" data-k="${k}" data-p="${p}">${p?'<option value="">（无，只有一节）</option>':''}${st.classes.map(c=>{const g=st.groups.find(x=>x.classIds.includes(c.id));return `<option value="${c.id}" ${c.id===cur?'selected':''}>${h(c.name)}${g&&c.id!==cur?' · 现在 '+h(g.room||'未定'):''}</option>`;}).join('')}</select>`;
   const fixedT=st.teachers.filter(t=>t.status==='fixed');
-  return pageHead('设置 · 教室','班级与教室','每间教室一晚两节：先上的班 19:10-19:50，后上的班 20:00-20:40，同一位老师连着上。这里改和“老师与分配”里改是同一份数据。')+
+  return pageHead('设置 · 教室','班级与教室','学院的固定表：相邻两个班同一间教室（1-2、3-4……，15 班单独），号小的班第一批、号大的第二批，同一位老师连着上。一般开学设好就不动；导出的正式版 Excel 里同一间教室的两个班会挨在一起。')+
   `<div class="split"><div class="card"><div class="card-h"><h2>教室安排</h2><span class="sub">改动会同步到 ${monthLabel(view.month)} 及以后的课表，之前的月份保持原样</span></div>
-  <div class="tbl-wrap"><table><thead><tr><th>教室</th><th>第一节 ${TM(0)}</th><th></th><th>第二节 ${TM(1)}</th><th>固定老师</th><th>指定老师</th><th></th></tr></thead><tbody>
+  <div class="tbl-wrap"><table><thead><tr><th>教室</th><th>第一批 ${TM(0)}</th><th>第二批 ${TM(1)}</th><th>固定老师</th><th>指定老师</th><th></th></tr></thead><tbody>
   ${st.groups.map((g,k)=>{const ho=Object.keys(st.fixed).find(n=>st.fixed[n]===g.id);const des=Object.keys(st.designate||{}).filter(n=>st.designate[n]===g.id);
     return `<tr><td><input data-act="g-room" data-k="${k}" value="${h(g.room)}" list="rooms" style="width:90px"></td>
     <td>${anyCls(g.classIds[0],k,0)}</td>
-    <td><button class="ic xs" title="先后对调" data-act="g-flip" data-k="${k}" ${g.classIds.length<2?'disabled':''}>${svgI('swap')}</button></td>
     <td>${anyCls(g.classIds[1]||'',k,1)}</td>
     <td><select data-act="g-fix" data-k="${k}"><option value="">— 轮换 —</option>${fixedT.map(t=>`<option ${t.name===ho?'selected':''}>${h(t.name)}</option>`).join('')}</select></td>
     <td>${des.map(n=>`<span class="tag acc">${h(n)}</span>`).join(' ')||'<span class="note">—</span>'}</td>
     <td><button class="sm ghost" data-act="g-del" data-k="${k}">删除</button></td></tr>`;}).join('')}
   </tbody></table></div>
-  <div class="row add-row"><button data-act="g-add">＋ 新建一间教室</button><span class="note">选到别的教室里的班时，会把那个班挪过来。</span></div></div>
+  <div class="row add-row"><button data-act="g-add">＋ 新建一间教室</button><span class="note">选到别的教室里的班时，会把那个班挪过来；每间教室里号小的班自动排第一批。</span></div></div>
   <datalist id="rooms">${(st.roomPool||[]).map(r=>`<option value="${h(r)}">`).join('')}</datalist>
   <div class="stack">
   <div class="card"><div class="card-h"><h2>班级</h2></div><div class="tbl-wrap"><table><thead><tr><th>班级名</th><th>人数</th><th>教室</th><th></th></tr></thead><tbody>
@@ -1911,7 +2024,7 @@ function pageHelp(){
     <li>手机上：按住卡片约半秒，等它轻微放大再拖。</li>
     <li>点错了：点 <b>撤销</b>（或按 Ctrl+Z）。</li></ul>`)+
   sec(5,'改老师、班级和教室',`<ul><li><b>老师与分配</b>：给报名的固定老师选班（可以任选 1～2 个班）；给轮换老师指定“轮到时带哪个班”；增删老师。</li>
-    <li><b>班级与教室</b>：改教室号、改哪两个班合一间、对调先后、改上课时间。</li>
+    <li><b>班级与教室</b>：改教室号、设哪两个班一间教室（学院规定相邻两个班一间，号小的第一批）、改上课时间。</li>
     <li>这些改动会自动更新到当前月份及以后的课表，以前的月份保持原样。</li></ul>`)+
   sec(6,'发给学院、发到群里',`<ul><li><b>导出与备份</b> → <b>导出 Excel</b>：格式和学院的安排表一样，每个班一行，每周一列老师，可以直接发通知。</li>
     <li><b>含轮次、课时的 Excel</b> 和 <b>课表/列表图片</b>：让每位老师看到自己第几轮、已上多少课时。<b>一键导出全部</b>一次下 4 个文件。</li>
@@ -2162,7 +2275,6 @@ const ACT={
   'g-add':()=>commit(()=>{st.groups.push({id:'g'+Date.now().toString(36),room:'',classIds:[]});afterConfig();},'已新建，选一下班级和教室'),
   'g-del':el=>{const g=st.groups[+el.dataset.k];if(!confirm('删除教室 '+(g.room||'')+' 这一行？里面的班会变成“没放进教室”。'))return;
     commit(()=>{st.groups.splice(+el.dataset.k,1);for(const n in st.fixed)if(st.fixed[n]===g.id)st.fixed[n]=null;for(const n in st.designate)if(st.designate[n]===g.id)delete st.designate[n];afterConfig();});},
-  'g-flip':el=>commit(()=>{st.groups[+el.dataset.k].classIds.reverse();afterConfig();},'先后已对调'),
   'c-add':()=>{const n=$('#newC').value.trim();if(!n)return;commit(()=>st.classes.push({id:'c'+Date.now().toString(36),name:n,size:'',note:''}),'已添加，记得把它放进一间教室');},
   'c-del':el=>{const c=st.classes[+el.dataset.k];if(!confirm('删除 '+c.name+'？'))return;
     commit(()=>{st.classes.splice(+el.dataset.k,1);st.groups.forEach(g=>g.classIds=g.classIds.filter(id=>id!==c.id));afterConfig();});},
@@ -2183,8 +2295,11 @@ const ACT={
   'json-out':()=>download('晚修排课备份-'+new Date().toISOString().slice(0,10)+'.json',new Blob([JSON.stringify(Object.assign({},st,{templateXlsx:st.templateXlsx||builtinTpl()||undefined}),null,1)],{type:'application/json'})),
   'json-in':()=>$('#jsonFile').click(),
   reset:()=>{if(!confirm(ONLINE?'清空成空白？这个账号的全部排课和设置都会删掉（可先下载备份）。':'恢复成最初的数据？现在所有排课和设置都会丢失（可先下载备份）。'))return;commit(()=>{st=startData();},ONLINE?'已清空成空白':'已恢复初始数据');},
-  'cf-cloud':()=>{closeModal();const r=conflict.row;undo.push(JSON.stringify(st));st=E.migrate(r.data,UPGRADE);Sync.rev=r.rev;store.set(cacheKey(),JSON.stringify(st));render();setStatus('已同步到云端 '+hhmm());toast('已换成云端的版本');},
-  'cf-mine':()=>{closeModal();Sync.rev=conflict.row.rev;Sync.push();},
+  'cf-cloud':()=>{closeModal();applyRemote(conflict.row,'已换成云端的版本（本机那份可以点“撤销”找回）');},
+  'cf-mine':()=>{closeModal();Object.assign(Sync,{rev:conflict.row.rev,conflicted:false});Sync.push();},
+  'cf-backup':()=>ACT['json-out'](),
+  'sync-check':()=>Sync.check(true),
+  ver:()=>Ver.latest?location.reload():Ver.check(true),
   'login-gh':()=>Cloud.signInGitHub(),
   'login-tab':el=>{gateMode=el.dataset.m;showGate();},
   'login-forgot':async()=>{const em=$('#lgEmail').value.trim();if(!em)return gateMsg('先填上邮箱或账号名，再点“忘记密码”');
@@ -2310,6 +2425,14 @@ document.addEventListener('click',e=>{
   if(ACT[k])ACT[k](el);
 });
 const CHANGE={
+  'as-grp':el=>{const n=el.dataset.n,kind=el.dataset.k,gid=el.value||null;
+    if(kind==='designate'){commit(()=>{if(gid)st.designate[n]=gid;else delete st.designate[n];afterConfig();},gid?n+' 轮到时带 '+E.groupLabel(st,gid):n+' 回到普通轮换');return;}
+    const holder=gid&&Object.keys(st.fixed).find(x=>x!==n&&st.fixed[x]===gid);
+    if(holder){el.value=st.fixed[n]||'';
+      modal('这间教室现在由 '+h(holder)+' 固定带',h(E.groupLabel(st,gid)),`<p>${h(n)} 改带这间后，${h(holder)} 怎么办？</p>`,
+        `<button data-act="close">取消</button><button data-act="fix-do" data-n="${h(n)}" data-g="${gid}" data-ids="${E.group(st,gid).classIds.join(',')}" data-m="evict">让 ${h(holder)} 进待分配</button><button class="pri" data-act="fix-do" data-n="${h(n)}" data-g="${gid}" data-ids="${E.group(st,gid).classIds.join(',')}" data-m="swap">两人互换</button>`);
+      return;}
+    commit(()=>{E.setFixed(st,n,gid);afterConfig();},gid?n+' 固定带 '+E.groupLabel(st,gid):n+' 进待分配');},
   'as-cls':el=>{const n=el.dataset.n,kind=el.dataset.k,p=+el.dataset.p;
     const gid=kind==='fixed'?st.fixed[n]:st.designate[n];const cur=gid&&E.group(st,gid)?E.group(st,gid).classIds.slice():[];
     /* 选了另一格里已有的班 = 两个班先后对调 */
@@ -2429,22 +2552,28 @@ async function bootOnline(){
   try{r=await Cloud.handleRedirect();}catch(e){return showGate(null,e.message);}
   if(!Cloud.loggedIn())return showGate(null,r&&r.error);
   try{await Cloud.reloadUser();}catch(e){if(!e.offline){await Cloud.signOut();return showGate(null,'登录过期了，请重新登录');}}
-  let row=null,first=false;
+  let row=null,first=false,offline=false,then=null;
+  const cache=store.get(cacheKey());let meta=null;try{meta=JSON.parse(store.get(metaKey()));}catch(e){}
   try{row=await Cloud.load();}
-  catch(e){
-    const c=store.get(cacheKey());
-    if(!c)return showGate(null,e.message);
-    st=E.migrate(JSON.parse(c),UPGRADE);toast('连不上服务器，先显示这台电脑上次的数据');
-  }
-  if(row){st=E.migrate(row.data,UPGRADE);Sync.rev=row.rev;store.set(cacheKey(),JSON.stringify(st));}
-  else if(!store.get(cacheKey())){st=startData();Sync.rev=0;first=true;}
-  Sync.ready=true;
-  document.body.classList.remove('gated');renderAccount();setStatus(row?'已同步到云端':'云端还没有数据');render(true);
-  if(r&&r.type==='recovery')setTimeout(passwordModal,400);
+  catch(e){if(!cache)return showGate(null,e.message);offline=true;}
+  /* 本机缓存里有上次没传上去的改动：底稿版本和云端一致就补传；云端已经被别的设备改过，就让用户选 */
+  const local=cache&&meta&&meta.dirty?E.migrate(JSON.parse(cache),UPGRADE):null;
+  if(offline){st=E.migrate(JSON.parse(cache),UPGRADE);Sync.rev=meta?meta.rev:0;Sync.dirty=!!(meta&&meta.dirty);toast('连不上服务器，先显示这台电脑上次的数据');}
+  else if(local&&(!row||row.rev===meta.rev)){st=local;Sync.rev=row?row.rev:0;Sync.dirty=true;then=()=>{Sync.push();toast('上次没传上去的改动，正在补传');};}
+  else if(local){st=local;Sync.rev=meta.rev;Sync.dirty=true;then=conflict;}
+  else if(row){st=E.migrate(row.data,UPGRADE);Sync.rev=row.rev;store.set(cacheKey(),JSON.stringify(st));}
+  else{st=startData();Sync.rev=0;first=true;}
+  if(row)Object.assign(Sync,{cloudAt:row.updated_at,cloudBy:(row.data&&row.data.savedBy)||'',checkedAt:Date.now()});
+  keepMeta(Sync.dirty);Sync.ready=true;
+  document.body.classList.remove('gated');renderAccount();render(true);
+  if(offline)setStatus('连不上网：改动先存在本机，联网后自动同步',true);else if(row)Sync.ok();else setStatus('云端还没有数据');
+  if(then)then();
+  else if(r&&r.type==='recovery')setTimeout(passwordModal,400);
   else if(first)setTimeout(firstTimeModal,400);
   else if(r&&r.type==='signup')toast('邮箱已确认，欢迎！');
+  Ver.check();
 }
-mountShell();
+mountShell();Ver.show();
 if(ONLINE)bootOnline();else render(true);
 
 </script>
