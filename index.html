@@ -526,7 +526,7 @@ button.is-error{animation:shake .42s cubic-bezier(.36,.07,.19,.97)}
 <div id="toast" class="toast" role="status"></div>
 <script id="saved-data" type="application/json">null</script>
 <script>
-const BUILD={"time":"2026-10-24T14:26:16.458Z","sha":"daf4527+"};
+const BUILD={"time":"2026-10-24T14:28:35.120Z","sha":"daf4527+"};
 /* ---- engine.js ---- */
 /* ================= 排课引擎：数据模型、次数/轮次、自动排课、固定老师同步、校验 =================
    纯逻辑，不碰页面；浏览器里是全局 Engine，node 里 require 进来测试。
@@ -903,18 +903,25 @@ function roundSheets(st,dates){
   }
   const end=addDays(dates[dates.length-1]||'2000-01-01',1);
   const {cnt,hrs}=tally(st,end);
-  const names=[...new Set(weeks.flatMap(w=>w.skip?[]:w.rows.map(r=>r.teacher).filter(Boolean)))];
+  /* 以前月份也列出来：以前课时 + 本月课时 = 截至月底累计课时，一看就对得上 */
+  const start=dates[0]||'2000-01-01',prevWeeks=sortedWeeks(st).filter(w=>w.date<start&&!w.skip);
+  const prevHrs=tally(st,start).hrs;
+  const taught=ws=>ws.flatMap(w=>w.skip?[]:w.rows.map(r=>r.teacher).filter(Boolean));
+  const names=[...new Set(taught(weeks).concat(taught(prevWeeks)))].filter(n=>teacher(st,n));
   const ord={fixed:0,rotate:1};
   names.sort((a,b)=>((ord[(teacher(st,a)||{}).status]??2)-(ord[(teacher(st,b)||{}).status]??2))||a.localeCompare(b,'zh'));
-  const t2=[['老师','身份','本月上课（日期 · 教室 · 课时）','本月课时','截至月底累计课时','截至月底轮次']];
+  const lessons=(ws,n)=>{const items=[];let h=0;for(const w of ws){if(w.skip)continue;for(const r of w.rows)if(r.teacher===n){const x=rowHours(r);h+=x;items.push(md(w.date)+' · '+(r.room||'')+' · '+x+'课时');}}return {items,h};};
+  const t2=[['老师','身份','以前上课（日期 · 教室 · 课时）','以前课时','本月上课（日期 · 教室 · 课时）','本月课时','截至月底累计课时','截至月底轮次']];
+  const h2={};
   for(const n of names){
-    const items=[];let mh=0;
-    for(const w of weeks){if(w.skip)continue;for(const r of w.rows)if(r.teacher===n){const x=rowHours(r);mh+=x;items.push(md(w.date)+' · '+(r.room||'')+' · '+x+'课时');}}
-    t2.push([n,isFixed(n)?'固定':'轮换',items.join('\n'),mh,hrs[n]||0,isFixed(n)?'—（固定不轮换）':'已上到第'+(cnt[n]||0)+'轮']);
+    const prev=lessons(prevWeeks,n),cur=lessons(weeks,n),base=(teacher(st,n).base||0)*2;
+    if(base)prev.items.unshift('系统启用前已上 '+base+'课时');
+    h2[t2.length]=Math.max(2,prev.items.length,cur.items.length)*15+6;   /* 一条一行，写死行高，手机上才不被挡 */
+    t2.push([n,isFixed(n)?'固定':'轮换',prev.items.join('\n')||'—',prevHrs[n]||0,cur.items.join('\n')||'本月没排',cur.h,hrs[n]||0,isFixed(n)?'—（固定不轮换）':'已上到第'+(cnt[n]||0)+'轮']);
   }
   return [
     {name:'课表（含轮次课时）',rows,merges,heights,widths:[6,26,10,13].concat(...weeks.map(()=>[10,9,16])),notes:ROUND_NOTES},
-    {name:'老师汇总',rows:t2,widths:[10,8,44,10,16,16],notes:ROUND_NOTES,styleOf:(r,c)=>c===2?4:2},
+    {name:'老师汇总',rows:t2,heights:h2,widths:[10,8,36,9,36,9,14,16],notes:ROUND_NOTES,styleOf:(r,c)=>c===2||c===4?4:2},
   ];
 }
 
