@@ -526,7 +526,7 @@ button.is-error{animation:shake .42s cubic-bezier(.36,.07,.19,.97)}
 <div id="toast" class="toast" role="status"></div>
 <script id="saved-data" type="application/json">null</script>
 <script>
-const BUILD={"time":"2026-10-24T13:50:37.207Z","sha":"947b5e0+"};
+const BUILD={"time":"2026-10-24T14:18:56.651Z","sha":"d827923+"};
 /* ---- engine.js ---- */
 /* ================= 排课引擎：数据模型、次数/轮次、自动排课、固定老师同步、校验 =================
    纯逻辑，不碰页面；浏览器里是全局 Engine，node 里 require 进来测试。
@@ -872,25 +872,33 @@ const ROUND_NOTES=[
   '1. 轮次：轮换老师按顺序轮流上晚修，每轮到一次算一轮（第1轮、第2轮……），每人每一轮只排一次；这一轮所有人都上过了才开始下一轮（某一周本轮剩下的人不够排满时，空位由下一轮最先轮到的人补上）。',
   '2. 课时：一个班上一节（40 分钟）= 1 课时。一轮 = 一晚在同一间教室连上两个班 = 2 课时；机电15班只有一个班，轮到机电15班的那一轮只算 1 课时。',
   '3. 固定老师：报名长期带班，每周都上，不参加轮换，只统计课时。',
-  '4. 累计课时：到这一晚（含这一晚）为止上过的晚修总课时，包括 10 月已上的。',
+  '4. 课时一栏写两行：“本晚”是这一晚上的课时（一般 2 课时，机电15班 1 课时），“累计”是到这一晚（含这一晚）为止上过的晚修总课时，包括 10 月已上的。',
+  '5. 同一间教室的两个班由同一位老师连着上，所以老师、轮次、课时合并成一格。',
 ];
 function roundSheets(st,dates){
   const weeks=dates.map(d=>weekOf(st,d)).filter(Boolean);
   const rm=roundMap(st),hm=hoursMap(st);
   const isFixed=n=>(teacher(st,n)||{}).status==='fixed';
-  const head=['序号','班级','晚修课室','上课时间'].concat(...weeks.map(w=>[md(w.date)+'\n上课教师',md(w.date)+'\n轮次',md(w.date)+'\n累计课时']));
-  const rows=[head];let i=0;
-  for(const g of st.groups)g.classIds.forEach((id,k)=>{
-    const c=cls(st,id);if(!c)return;
-    const tm=(st.times||[])[k];
-    rows.push([++i,c.name,g.room||'',tm?tm[0]+'-'+tm[1]:''].concat(...weeks.map(w=>{
+  const head=['序号','班级','晚修课室','上课时间'].concat(...weeks.map(w=>[md(w.date)+'\n上课教师',md(w.date)+'\n轮次',md(w.date)+'\n本晚/累计课时']));
+  const rows=[head],merges=[];let i=0;
+  const colName=n=>{let x='';n++;while(n){const m=(n-1)%26;x=String.fromCharCode(65+m)+x;n=Math.floor((n-1)/26);}return x;};
+  for(const g of st.groups){
+    const ids=g.classIds.filter(id=>cls(st,id));if(!ids.length)continue;
+    /* 同一间教室的几个班：教室、老师、轮次、课时只在第一行写，再把这几行合并成一格，免得看成一晚上了好几份课时 */
+    const per=weeks.map(w=>{
       if(w.skip)return ['停课','',''];
       const r=w.rows.find(x=>x.gid===g.id),t=r&&r.teacher;
       if(!t)return ['','',''];
-      const rd=isFixed(t)?'固定':'第'+rm[w.date][t]+'轮'+(r.b2?'':'（本轮1课时）');
-      return [t,rd,hm[w.date][t]+'课时'];
-    })));
-  });
+      return [t,isFixed(t)?'固定':'第'+rm[w.date][t]+'轮','本晚 '+rowHours(r)+' 课时\n累计 '+hm[w.date][t]+' 课时'];
+    });
+    const top=rows.length;
+    ids.forEach((id,k)=>{
+      const c=cls(st,id),tm=(st.times||[])[k];
+      rows.push([++i,c.name,k?'':g.room||'',tm?tm[0]+'-'+tm[1]:''].concat(...per.map(x=>k?['','','']:x)));
+    });
+    if(ids.length>1)for(const ci of [2].concat(...weeks.map((w,j)=>[4+3*j,5+3*j,6+3*j])))
+      merges.push('<mergeCell ref="'+colName(ci)+(top+1)+':'+colName(ci)+(top+ids.length)+'"/>');
+  }
   const end=addDays(dates[dates.length-1]||'2000-01-01',1);
   const {cnt,hrs}=tally(st,end);
   const names=[...new Set(weeks.flatMap(w=>w.skip?[]:w.rows.map(r=>r.teacher).filter(Boolean)))];
@@ -903,7 +911,7 @@ function roundSheets(st,dates){
     t2.push([n,isFixed(n)?'固定':'轮换',items.join('\n'),mh,hrs[n]||0,isFixed(n)?'—（固定不轮换）':'已上到第'+(cnt[n]||0)+'轮']);
   }
   return [
-    {name:'课表（含轮次课时）',rows,widths:[6,26,10,13].concat(...weeks.map(()=>[10,13,10])),notes:ROUND_NOTES},
+    {name:'课表（含轮次课时）',rows,merges,widths:[6,26,10,13].concat(...weeks.map(()=>[10,9,16])),notes:ROUND_NOTES},
     {name:'老师汇总',rows:t2,widths:[10,8,44,10,16,16],notes:ROUND_NOTES,styleOf:(r,c)=>c===2?4:2},
   ];
 }
@@ -1162,7 +1170,7 @@ function card(ctx,x,y,w,h,d){
   let tx=px+ctx.measureText(nm).width+8;
   if(d.teacher){
     if(d.fixed){tx+=tag(ctx,tx,cy+2,'固定',C.fix,'#fff',11.5)+5;tx+=tag(ctx,tx,cy+2,'累计'+d.hours+'课时','#ffffff',p.tx,11.5);}
-    else{tx+=tag(ctx,tx,cy+2,'第'+d.round+'轮',p.tag,p.tx,11.5)+5;tx+=tag(ctx,tx,cy+2,d.hours+'课时','#ffffff',p.tx,11.5);}
+    else{tx+=tag(ctx,tx,cy+2,'第'+d.round+'轮',p.tag,p.tx,11.5)+5;tx+=tag(ctx,tx,cy+2,'累计'+d.hours+'课时','#ffffff',p.tx,11.5);}
   }
   cy+=30;ctx.textBaseline='top';
   /* 两节课 */
@@ -1829,7 +1837,7 @@ function lessonCard(w,i,rm){
   return `<div class="${cls}" style="${r.teacher?tc(r.teacher):'--h:220'}" ${act} data-key="${d}|${i}">
     <div class="l-top"><span class="nm">${r.teacher?h(r.teacher):'待排'}</span>
       ${!r.teacher?'':isFixedT(r.teacher)?`<span class="fx">固定</span><span class="hr" title="到这一晚（含）为止共上的晚修课时">累计${HM[d][r.teacher]}课时</span>`
-        :`<span class="rd" title="轮换到第几轮">第${rm[d][r.teacher]}轮</span><span class="hr" title="到这一晚（含）为止共上的晚修课时">${HM[d][r.teacher]}课时</span>`}
+        :`<span class="rd" title="轮换到第几轮">第${rm[d][r.teacher]}轮</span><span class="hr" title="到这一晚（含）为止共上的晚修课时">累计${HM[d][r.teacher]}课时</span>`}
       ${r.locked&&!w.history?svgI('lock','lk'):''}</div>
     <div class="l-row"><span class="tm">${TM(0)}</span><span class="cn">${h(r.b1)}</span></div>
     ${r.b2?`<div class="l-row"><span class="tm">${TM(1)}</span><span class="cn">${h(r.b2)}</span></div>`:'<div class="l-row only"><span class="tm"></span><span class="cn">（这间只有一节）</span></div>'}
