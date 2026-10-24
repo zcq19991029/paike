@@ -455,6 +455,42 @@ body.gated #nav,body.gated .themes{visibility:hidden}
 .tb-prev p{margin:0 0 6px}
 .tb-prev .row{gap:6px}
 
+/* 工具条三段：左视图切换、中间月份、右边操作 */
+.toolbar.tb3{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:12px}
+.tb-l,.tb-r{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tb-r{justify-content:flex-end}
+.tb-c{display:flex;align-items:center;gap:6px;justify-content:center}
+@media(max-width:1180px){.toolbar.tb3{grid-template-columns:1fr}.tb-c{order:-1}.tb-l,.tb-r{justify-content:center}}
+
+/* 弹窗渐进退出 */
+.modal.closing{animation:fadeOut .22s ease-in forwards}
+.modal.closing .dlg{animation:popOut .22s var(--spring) forwards}
+@keyframes fadeOut{to{opacity:0}}
+@keyframes popOut{to{opacity:0;transform:translateY(10px) scale(.96);filter:blur(2px)}}
+.gate-card.out{animation:popOut .26s var(--spring) forwards}
+
+/* 按钮手感：加载转圈、成功打勾、失败晃动 */
+button.is-loading{color:transparent!important;pointer-events:none}
+button.is-loading>*{visibility:hidden}
+button.is-loading::before{content:"";position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;
+  border:2px solid currentColor;border-color:var(--acc) transparent var(--acc) transparent;animation:spin .7s linear infinite}
+button.pri.is-loading::before{border-color:#fff transparent #fff transparent}
+@keyframes spin{to{transform:rotate(360deg)}}
+button.is-done{background:linear-gradient(180deg,#34c47a,#16a35a)!important;border-color:transparent!important;color:#fff!important;
+  box-shadow:0 6px 18px -6px rgba(22,163,90,.55)!important;animation:doneIn .45s var(--bounce)}
+button.is-done .ok-ic{width:16px;height:16px;margin-right:6px;vertical-align:-3px;fill:none;stroke:#fff;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:24;stroke-dashoffset:24;animation:draw .38s .08s var(--spring) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes doneIn{0%{transform:scale(.94)}60%{transform:scale(1.04)}100%{transform:none}}
+button.is-error{animation:shake .42s cubic-bezier(.36,.07,.19,.97)}
+@keyframes shake{10%,90%{transform:translateX(-1px)}20%,80%{transform:translateX(3px)}30%,50%,70%{transform:translateX(-5px)}40%,60%{transform:translateX(5px)}}
+/* 右边操作不折行：列宽至少放得下内容，放不下时整条改成上下排 */
+.toolbar.tb3{grid-template-columns:minmax(max-content,1fr) auto minmax(max-content,1fr)}
+.tb-r{flex-wrap:nowrap;gap:8px}
+.tb-r .undo-pair button{padding:7px 12px}
+.tb-r>button:not(.pri){padding:7px 12px}
+@media(max-width:1180px){.toolbar.tb3{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body>
@@ -1557,8 +1593,7 @@ function pageWeek(issues){
   const due=q.filter(x=>x.count===minC).length;
   const first=dates[0],last=dates[dates.length-1];
   let out=pageHead('月课表 · 每'+wd(first||'2026-11-02')+'晚修',monthLabel(view.month)+'晚修课表',
-    first?`${E.md(first)} — ${E.md(last)} · ${dates.length} 个${wd(first)} · ${st.groups.length} 间教室${hist?' · 历史记录（当时 3 个班合上）':''}`:'',
-    `${monthSw()}<button class="ghost sm" data-act="month-today">回到下个月</button>`);
+    first?`${E.md(first)} — ${E.md(last)} · ${dates.length} 个${wd(first)} · ${st.groups.length} 间教室${hist?' · 历史记录（当时 3 个班合上）':''}`:'');
   out+=`<div class="stats">
     <div class="stat"><div class="k">本月上课</div><div class="v" data-count="${live.length}">${live.length}</div><div class="s">${weeks.filter(w=>w&&w.skip).length?weeks.filter(w=>w&&w.skip).length+' 周停课':'共 '+dates.length+' 个'+wd(first||'2026-11-02')}</div></div>
     <div class="stat"><div class="k">上课老师</div><div class="v" data-count="${names.size}">${names.size}</div><div class="s">固定 ${st.teachers.filter(t=>t.status==='fixed').length} 人 · 轮换 ${st.teachers.filter(t=>t.status==='rotate').length} 人</div></div>
@@ -1569,7 +1604,7 @@ function pageWeek(issues){
     <ol class="g-steps">
       <li><b>看课表</b>：每一列是一个周一晚上，每一行是一间教室。卡片上写着谁来上、两个班各自几点到几点。</li>
       <li><b>标签的意思</b>：<span class="tag fx">固定</span> 是报名长期带班的老师；<span class="tag acc">第N轮</span> 是轮流的老师第几次轮到；<span class="tag">N课时</span> 是到这一晚为止一共上了多少节（一节 40 分钟算 1 课时）。</li>
-      <li><b>排一个月</b>：用右上角箭头选月份，点 <b>自动排本月</b>，系统按规则排好。</li>
+      <li><b>排一个月</b>：用课表上方中间的 ‹ › 选月份，点右边的 <b>自动排本月</b>，系统按规则排好。</li>
       <li><b>调整</b>：用鼠标<b>按住卡片拖到另一张卡片</b>就互换；拖到右边名单就取消；从右边名单拖进来就安排。也可以直接点卡片选人。</li>
       <li><b>发出去</b>：左边 <b>导出与备份</b> → 导出 Excel 或复制群通知。</li>
     </ol></div>`;
@@ -1577,13 +1612,13 @@ function pageWeek(issues){
   if(unf.length)out+=`<div class="warns">待分配的固定老师：<b>${unf.map(h).join('、')}</b>。到“老师与分配”里给他们选班级。</div>`;
   out+=`<div class="with-rail"><div class="rail-main">`;
   if(swapFrom)out+=`<div class="swapbar">${svgI('swap','ic16')}<span>已选中 ${E.md(swapFrom.date)} · <b>${h(swapFrom.name||'空格')}</b>，再点另一格完成互换</span><span class="sp"></span><button class="sm" data-act="swap-cancel">取消</button></div>`;
-  out+=`<div class="toolbar row">
-    <div class="seg" role="group"><button class="${view.mode==='grid'?'on':''}" data-act="mode" data-m="grid">${svgI('grid')}课表视图</button><button class="${view.mode==='list'?'on':''}" data-act="mode" data-m="list">${svgI('list')}列表视图</button></div>
-    <span class="sp"></span>
-    <div class="undo-pair"><button data-act="undo" title="撤销（Ctrl+Z）" ${undo.length?'':'disabled'}>${svgI('undo','ic16')}撤销</button><button data-act="redo" title="重做（Ctrl+Y）" ${redo.length?'':'disabled'}>重做${svgI('redo2','ic16 r')}</button></div>
-    ${has?`<button class="ghost" data-act="clear-month" title="删掉这个月的全部排课，可以撤销">清空本月</button><button data-tab="io">${svgI('io','ic16')}导出</button>`:''}
+  out+=`<div class="toolbar tb3">
+    <div class="tb-l"><div class="seg" role="group"><button class="${view.mode==='grid'?'on':''}" data-act="mode" data-m="grid">${svgI('grid')}课表视图</button><button class="${view.mode==='list'?'on':''}" data-act="mode" data-m="list">${svgI('list')}列表视图</button></div></div>
+    <div class="tb-c">${monthSw()}${view.month!==nextMonth()?'<button class="ghost sm" data-act="month-today">回到下个月</button>':''}</div>
+    <div class="tb-r"><div class="undo-pair"><button data-act="undo" title="撤销（Ctrl+Z）" ${undo.length?'':'disabled'}>${svgI('undo','ic16')}撤销</button><button data-act="redo" title="重做（Ctrl+Y）" ${redo.length?'':'disabled'}>重做${svgI('redo2','ic16 r')}</button></div>
+    ${has?`<button class="ghost" data-act="clear-month" title="清空本月：删掉这个月的全部排课，可以撤销">清空</button><button class="ic" data-tab="io" title="导出：正式版 Excel、含轮次版、课表图片" aria-label="导出">${svgI('io')}</button>`:''}
     ${genLabel?`<button class="pri" data-act="gen-month">${svgI('spark','ic16')}${genLabel}</button>`:''}
-  </div>`;
+  </div></div>`;
   if(!has){
     out+=`<div class="card empty"><div class="big-i">${svgI('week')}</div><h2>${monthLabel(view.month)}还没有排课</h2>
       ${before?`<p class="note">这个月份在已有记录（${E.md(firstDate)}）之前，不用排课。</p>`
@@ -1866,7 +1901,7 @@ function pageHelp(){
     <li>一个班上一节（40 分钟）算 <b>1 课时</b>；一晚带两个班就是 2 课时，带机电15班是 1 课时。</li>
     <li>卡片右上角有小锁：这一格是手动定的，“重排”时不会被改。</li>
     <li>每列顶上：绿点 = 这一周没问题；黄色数字 = 有几条提示，提示内容在课表下方。</li></ul>`)+
-  sec(3,'排一个月',`<ol><li>右上角用 ‹ › 选月份。</li><li>点蓝色按钮 <b>自动排本月</b>（已经排过的话叫“整月重排”）。</li>
+  sec(3,'排一个月',`<ol><li>课表上方中间用 ‹ › 选月份。</li><li>点蓝色按钮 <b>自动排本月</b>（已经排过的话叫“整月重排”）。</li>
     <li>系统规则：固定老师带自己的班；其余老师谁上得少谁先上，上得一样多的话，上次上课早的先上，每轮每人只排一次。</li>
     <li>只想重排某一周：点那一列顶上的 ↻；这一周不上晚修：点 ⏸ 设为停课。</li></ol>`)+
   sec(4,'手动调整',`<ul><li><b>互换两位老师</b>：鼠标按住一张卡片，拖到另一张卡片上松开。可以跨周。</li>
@@ -1930,12 +1965,45 @@ function batchPreview(){
 }
 
 /* ---------- 对话框 ---------- */
+let modalT=0;
 function modal(title,sub,body,foot){
-  const m=$('#modal');
+  const m=$('#modal');clearTimeout(modalT);m.classList.remove('closing');
   m.innerHTML=`<div class="dlg" role="dialog" aria-modal="true"><h3>${title}</h3>${sub?`<div class="dsub">${sub}</div>`:''}<div class="body">${body}</div><div class="foot">${foot||'<button class="pri" data-act="close">关闭</button>'}</div></div>`;
   m.hidden=false;
 }
-const closeModal=()=>{$('#modal').hidden=true;$('#modal').innerHTML='';};
+/* 关闭：弹窗轻轻缩小下沉、背景淡出（0.22 秒），再真正收起 */
+function closeModal(){
+  const m=$('#modal');if(m.hidden)return Promise.resolve();
+  clearTimeout(modalT);
+  if(REDUCE){m.hidden=true;m.innerHTML='';return Promise.resolve();}
+  m.classList.add('closing');
+  return new Promise(res=>{modalT=setTimeout(()=>{m.hidden=true;m.innerHTML='';m.classList.remove('closing');res();},220);});
+}
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+const CHECK='<svg class="ok-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+/* 按钮的三种状态：加载中（转圈、宽度不变、不能连点）→ 成功（变绿打勾，停 0.7 秒）/ 失败（左右晃一下）
+   成功后由调用方决定下一步（通常是让弹窗渐进退出）；按钮如果还在页面上，1.2 秒后自己恢复 */
+async function busy(btn,fn,done){
+  if(!btn||btn.classList.contains('is-loading'))return undefined;
+  const html=btn.innerHTML;btn.style.minWidth=btn.offsetWidth+'px';
+  btn.classList.add('is-loading');btn.disabled=true;
+  const back=()=>{btn.classList.remove('is-loading','is-done','is-error');btn.innerHTML=html;btn.disabled=false;btn.style.minWidth='';};
+  try{
+    const r=await fn();
+    btn.classList.remove('is-loading');btn.classList.add('is-done');btn.innerHTML=CHECK+'<span>'+(done||'完成')+'</span>';
+    setTimeout(()=>{if(btn.isConnected)back();},1200);
+    await wait(REDUCE?0:700);
+    return r;
+  }catch(e){
+    back();btn.classList.add('is-error');setTimeout(()=>btn.classList.remove('is-error'),450);
+    throw e;
+  }
+}
+/* 不用等网络的确认按钮：打一下勾再关弹窗 */
+async function doneThenClose(btn,text){
+  if(btn&&!REDUCE){btn.style.minWidth=btn.offsetWidth+'px';btn.classList.add('is-done');btn.innerHTML=CHECK+'<span>'+(text||'好了')+'</span>';await wait(380);}
+  await closeModal();
+}
 function download(name,blob){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);}
 
 function genWeeks(dates){
@@ -2023,6 +2091,7 @@ async function exportPng(mode){
   toast('已导出 '+(mode==='grid'?'课表':'列表')+'视图图片（'+canvas.width+'×'+canvas.height+'）');
 }
 
+async function xAll(){await exportOfficial();await wait(400);exportRound();await wait(400);await exportPng('grid');await exportPng('list');}
 /* ---------- 事件 ---------- */
 const ACT={
   tab:el=>{if(view.tab!==el.dataset.tab)setView({tab:el.dataset.tab});},
@@ -2042,7 +2111,7 @@ const ACT={
       (later.length?`<p>以后的月份也排过了：<b>${later.map(monthLabel).join('、')}</b>。想从这个月重新排、不被后面影响，就一起清空。</p>`:''),
       `<button data-act="close">取消</button>${later.length?`<button class="danger" data-act="clear-do" data-later="1">清空本月及以后（${later.length+1} 个月）</button>`:''}<button class="${later.length?'':'danger'}" data-act="clear-do">只清空${monthLabel(ym)}</button>`);
   },
-  'clear-do':el=>{closeModal();const all=!!el.dataset.later;
+  'clear-do':el=>{doneThenClose(el,'已清空');const all=!!el.dataset.later;
     const n=st.weeks.filter(w=>all?w.date>=view.month+'-01':w.date.startsWith(view.month)).length;
     commit(()=>{E.clearMonths(st,view.month,all);},'已清空 '+n+' 周'+(all?'（本月及以后）':'')+'，点“自动排本月”重新排');},
   'gen-month':()=>{
@@ -2084,7 +2153,7 @@ const ACT={
      <div id="tbPrev" class="tb-prev"></div>`,
     '<button data-act="close">取消</button><button class="pri" data-act="tb-apply" disabled>添加</button>');batchPreview();setTimeout(()=>$('#tbText')&&$('#tbText').focus(),50);},
   'tb-apply':()=>{
-    const neu=parseTeachers($('#tbText').value).filter(x=>!E.teacher(st,x.name));if(!neu.length)return;closeModal();
+    const neu=parseTeachers($('#tbText').value).filter(x=>!E.teacher(st,x.name));if(!neu.length)return;doneThenClose($('[data-act="tb-apply"]'),'已添加');
     commit(()=>{const {cnt}=E.tally(st,null);const base=minOr(st.teachers.filter(t=>t.status==='rotate').map(t=>cnt[t.name]));
       for(const x of neu){st.teachers.push({name:x.name,status:x.status,reason:x.reason,base:x.status==='rotate'?base:0});if(x.status==='fixed')st.fixed[x.name]=null;}
       E.assignColors(st);},'已添加 '+neu.length+' 位老师'+(neu.some(x=>x.status==='fixed')?'，固定老师记得到上面选班':''));},
@@ -2097,10 +2166,10 @@ const ACT={
   'c-add':()=>{const n=$('#newC').value.trim();if(!n)return;commit(()=>st.classes.push({id:'c'+Date.now().toString(36),name:n,size:'',note:''}),'已添加，记得把它放进一间教室');},
   'c-del':el=>{const c=st.classes[+el.dataset.k];if(!confirm('删除 '+c.name+'？'))return;
     commit(()=>{st.classes.splice(+el.dataset.k,1);st.groups.forEach(g=>g.classIds=g.classIds.filter(id=>id!==c.id));afterConfig();});},
-  'x-official':()=>exportOfficial(),
+  'x-official':el=>busy(el,exportOfficial,'已导出').catch(e=>toast(e.message)),
   'tpl-in':()=>$('#tplFile').click(),
-  'tpl-clear':()=>commit(()=>{delete st.templateXlsx;},'已改回内置模板'),'x-round':()=>exportRound(),png:el=>exportPng(el.dataset.m),
-  'x-all':async()=>{await exportOfficial();await new Promise(r=>setTimeout(r,400));exportRound();await new Promise(r=>setTimeout(r,400));await exportPng('grid');await exportPng('list');},
+  'tpl-clear':()=>commit(()=>{delete st.templateXlsx;},'已改回内置模板'),'x-round':el=>busy(el,async()=>exportRound(),'已导出').catch(e=>toast(e.message)),png:el=>busy(el,()=>exportPng(el.dataset.m),'已导出').catch(e=>toast(e.message)),
+  'x-all':el=>busy(el,xAll,'4 个都导出了').catch(e=>toast(e.message)),
   xlsx:()=>{const ds=monthDates().filter(d=>E.weekOf(st,d));if(!ds.length)return toast('本月还没有排课');
     download('华夏教研室晚修安排表-'+view.month+'.xlsx',Xlsx.build('机电教研室 ('+Number(view.month.slice(5))+'月)',E.sheetRows(st,ds),[6,10,30,9,10,20].concat(ds.map(()=>16),[16])));},
   notice:()=>{const t=E.noticeText(st,monthDates());
@@ -2125,9 +2194,14 @@ const ACT={
   'pw-change':()=>passwordModal(),
   'un-save':async()=>{const v=$('#unInput').value.trim();
     if(v&&!/^[A-Za-z0-9_.-]{3,32}$/.test(v))return toast('账号名只能用字母、数字、下划线、点、横线，3～32 位');
-    try{const n=await Cloud.setUsername(v);toast(n?'账号名已设为 '+n+(Cloud.hasPassword()?'':'，再设一个密码就能用账号名登录'):'已取消账号名');accountModal();}catch(e){toast(e.message);}},
+    let n;try{n=await busy($('[data-act="un-save"]'),()=>Cloud.setUsername(v),'已保存');}catch(e){return toast(e.message);}
+    toast(n?'账号名已设为 '+n+(Cloud.hasPassword()?'':'，再设一个密码就能用账号名登录'):'已取消账号名');accountModal();},
   'pw-save':async()=>{const p=$('#pw1').value,q=$('#pw2').value;if(p.length<6)return toast('密码至少 6 位');if(p!==q)return toast('两次输入的不一样');
-    try{await Cloud.setPassword(p);toast('密码已保存，现在可以用账号名或邮箱 + 密码登录');accountModal();}catch(e){toast(e.message);if(e.same)accountModal();}},
+    const btn=$('[data-act="pw-save"]');let same=false;
+    try{await busy(btn,async()=>{try{await Cloud.setPassword(p);}catch(e){if(e.same){same=true;return;}throw e;}},same?'已经设好了':'已保存');}
+    catch(e){return toast(e.message);}
+    toast(same?'这个就是现在的密码，已经设好了':'密码已保存，现在可以用账号名或邮箱 + 密码登录');
+    await closeModal();accountModal();},
   'logout':async()=>{if(Sync.dirty||Sync.busy){toast('还在同步，稍等几秒再退出');return Sync.push();}closeModal();await Cloud.signOut();try{localStorage.removeItem(cacheKey());}catch(e){}location.reload();},
   'first-blank':()=>{closeModal();Sync.push();toast('从空白开始：先去“班级与教室”添加班级和教室');setView({tab:'classes'});},
   'first-import':()=>{closeModal();$('#jsonFile').click();},
@@ -2312,12 +2386,12 @@ document.addEventListener('submit',async e=>{
   if(e.target.id!=='lgForm')return;e.preventDefault();
   const em=$('#lgEmail').value.trim(),pw=$('#lgPw').value,btn=e.target.querySelector('[type=submit]');
   if(gateMode==='signup'&&pw!==$('#lgPw2').value)return gateMsg('两次输入的密码不一样');
-  btn.disabled=true;gateMsg(gateMode==='signup'?'正在注册…':'正在登录…',true);
-  try{
-    if(gateMode==='signup'){const r=await Cloud.signUp(em,pw);if(r==='confirm'){btn.disabled=false;return gateMsg('确认邮件已发到 '+em+'。去邮箱点链接，会自动回到这里并登录（没收到就看看垃圾邮件）',true);}}
-    else await Cloud.signIn(em,pw);
-    bootOnline();
-  }catch(err){btn.disabled=false;gateMsg(err.message);}
+  gateMsg('',true);let r;
+  try{r=await busy(btn,async()=>gateMode==='signup'?Cloud.signUp(em,pw):(await Cloud.signIn(em,pw),'in'),gateMode==='signup'?'已注册':'登录成功');}
+  catch(err){return gateMsg(err.message);}
+  if(r==='confirm')return gateMsg('确认邮件已发到 '+em+'。去邮箱点链接，会自动回到这里并登录（没收到就看看垃圾邮件）',true);
+  const card=$('.gate-card');if(card&&!REDUCE){card.classList.add('out');await wait(260);}
+  bootOnline();
 });
 const GH_ICON='<svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true" style="margin-right:8px;vertical-align:-3px"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
 function renderAccount(){
