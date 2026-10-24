@@ -526,7 +526,7 @@ button.is-error{animation:shake .42s cubic-bezier(.36,.07,.19,.97)}
 <div id="toast" class="toast" role="status"></div>
 <script id="saved-data" type="application/json">null</script>
 <script>
-const BUILD={"time":"2026-10-24T13:41:21.226Z","sha":"fe2aaf2+"};
+const BUILD={"time":"2026-10-24T13:50:37.207Z","sha":"947b5e0+"};
 /* ---- engine.js ---- */
 /* ================= 排课引擎：数据模型、次数/轮次、自动排课、固定老师同步、校验 =================
    纯逻辑，不碰页面；浏览器里是全局 Engine，node 里 require 进来测试。
@@ -1760,7 +1760,7 @@ function pageWeek(issues){
   out+=view.mode==='grid'?gridHTML(dates,issues,rm):listHTML(dates,issues,rm);
   const all=dates.flatMap(d=>(issues[d]||[]).map(s=>[d,s]));
   if(all.length)out+=`<ul class="issues">${all.map(([d,s])=>`<li><b>${E.md(d)}</b>　${h(s)}</li>`).join('')}</ul>`;
-  out+=`<p class="note foot-note">${svgI('spark','ic14')} 拖动课表里的名片可以互换；拖到右边名单 = 从课表移出；从右边名单拖进课表 = 排这位老师。点名片也能换人、锁定。动过的格子自动锁定，重排时不动。“第N轮” = 到这一周为止上过的晚修次数（含 10 月）。</p>`;
+  out+=`<p class="note foot-note">${svgI('spark','ic14')} 拖动课表里的名片可以互换（平板、手机上按住名片半秒，变大后再拖）；拖到右边名单 = 从课表移出；从右边名单拖进课表 = 排这位老师。点名片也能换人、锁定。动过的格子自动锁定，重排时不动。“第N轮” = 到这一周为止上过的晚修次数（含 10 月）。</p>`;
   return out+`</div>${railHTML(dates)}</div>`;
 }
 /* 右侧名单：本轮还没排的老师名片（可拖进课表）；课表里的名片拖到这里就移出 */
@@ -2354,22 +2354,18 @@ function dropTarget(x,y){
   const c=el.closest('.lesson[data-act="cell"]');if(c)return c;
   return el.closest('[data-drop="pool"]');
 }
-document.addEventListener('pointerdown',e=>{
-  if(e.button!==0)return;
-  if(drag)endDrag(e,true);
-  const src=e.target.closest('[data-drag]');if(!src)return;
-  /* 触屏：长按 0.3 秒才开始拖，直接滑动仍然是滚动页面 */
-  const touch=e.pointerType!=='mouse';
-  drag={src,x:e.clientX,y:e.clientY,on:false,id:e.pointerId,over:null,touch,armed:!touch};
+/* 鼠标、笔用 pointer 事件；手指用 touch 事件：平板上一滑动浏览器就当成滚动并发 pointercancel，拖到一半会被取消 */
+function beginDrag(src,x,y,id,touch){
+  if(drag)endDrag(null,true);
+  drag={src,x,y,on:false,id,over:null,touch,armed:!touch};
+  /* 触屏：按住 0.3 秒才开始拖，直接滑动仍然是滚动页面 */
   if(touch)drag.timer=setTimeout(()=>{if(drag&&drag.src===src){drag.armed=true;src.classList.add('armed');if(navigator.vibrate)navigator.vibrate(15);}},300);
-});
-document.addEventListener('touchmove',e=>{if(drag&&drag.armed)e.preventDefault();},{passive:false});
-document.addEventListener('pointermove',e=>{
-  if(!drag||e.pointerId!==drag.id)return;
+}
+function moveDrag(x,y){
   if(!drag.on){
-    const moved=Math.hypot(e.clientX-drag.x,e.clientY-drag.y);
-    if(!drag.armed){if(moved>8){clearTimeout(drag.timer);drag=null;}return;}
-    if(moved<6&&!drag.touch)return;
+    const moved=Math.hypot(x-drag.x,y-drag.y);
+    if(!drag.armed){if(moved>8){clearTimeout(drag.timer);drag=null;}return false;}
+    if(moved<6&&!drag.touch)return false;
     drag.src.classList.remove('armed');
     /* 开始拖：复制一张跟着指针走的名片 */
     const r=drag.src.getBoundingClientRect();
@@ -2378,16 +2374,41 @@ document.addEventListener('pointermove',e=>{
     drag.dx=drag.x-r.left;drag.dy=drag.y-r.top;
     document.body.appendChild(g);drag.ghost=g;drag.on=true;
     drag.src.classList.add('dragging');document.body.classList.add('is-dragging',drag.src.dataset.drag==='cell'?'drag-cell':'drag-pool');
-    try{drag.src.releasePointerCapture&&drag.src.releasePointerCapture(e.pointerId);}catch(err){}
   }
-  e.preventDefault();
-  drag.ghost.style.transform=`translate(${e.clientX-drag.dx}px,${e.clientY-drag.dy}px) rotate(-2deg) scale(1.04)`;
-  const t=dropTarget(e.clientX,e.clientY);
+  drag.ghost.style.transform=`translate(${x-drag.dx}px,${y-drag.dy}px) rotate(-2deg) scale(1.04)`;
+  const t=dropTarget(x,y);
   const ok=t&&t!==drag.src&&!(t.dataset.drop==='pool'&&drag.src.dataset.drag==='pool');
   if(drag.over!==(ok?t:null)){if(drag.over)drag.over.classList.remove('drop-on');drag.over=ok?t:null;if(drag.over)drag.over.classList.add('drop-on');}
-  drag.px=e.clientX;drag.py=e.clientY;
+  drag.px=x;drag.py=y;
   if(!drag.raf)drag.raf=requestAnimationFrame(autoScroll);
+  return true;
+}
+document.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='touch'||e.button!==0)return;
+  const src=e.target.closest('[data-drag]');if(!src){if(drag)endDrag(null,true);return;}
+  beginDrag(src,e.clientX,e.clientY,e.pointerId,e.pointerType!=='mouse');
+});
+document.addEventListener('pointermove',e=>{
+  if(!drag||drag.id===-1||e.pointerId!==drag.id)return;
+  if(moveDrag(e.clientX,e.clientY)){e.preventDefault();try{drag.src.releasePointerCapture&&drag.src.releasePointerCapture(e.pointerId);}catch(err){}}
 },{passive:false});
+document.addEventListener('pointerup',e=>{if(drag&&drag.id!==-1)endDrag(e,false);});
+document.addEventListener('pointercancel',e=>{if(drag&&drag.id!==-1)endDrag(e,true);});
+const tp=e=>e.changedTouches[0];
+document.addEventListener('touchstart',e=>{
+  if(e.touches.length!==1){if(drag)endDrag(null,true);return;}
+  const src=e.target.closest&&e.target.closest('[data-drag]');if(!src)return;
+  const t=tp(e);beginDrag(src,t.clientX,t.clientY,-1,true);
+},{passive:true});
+document.addEventListener('touchmove',e=>{
+  if(!drag||drag.id!==-1)return;
+  if(drag.armed&&e.cancelable)e.preventDefault();   /* 按住以后不再滚动页面 */
+  const t=tp(e);moveDrag(t.clientX,t.clientY);
+},{passive:false});
+document.addEventListener('touchend',e=>{if(drag&&drag.id===-1){if(drag.on&&e.cancelable)e.preventDefault();const t=tp(e);if(drag.on)moveDrag(t.clientX,t.clientY);endDrag(e,false);}},{passive:false});
+document.addEventListener('touchcancel',e=>{if(drag&&drag.id===-1)endDrag(e,true);});
+/* 长按名片不弹系统菜单 */
+document.addEventListener('contextmenu',e=>{if(drag||(e.target.closest&&e.target.closest('[data-drag]')))e.preventDefault();});
 /* 停在窗口上下边、课表左右边附近时自动滚动；越靠边越快，快速划过几乎不动 */
 function autoScroll(){
   if(!drag||!drag.on)return;
@@ -2433,8 +2454,6 @@ function endDrag(e,cancel){
     b.r.teacher=n;b.r.locked=true;b.r.kind=st.fixed[n]===b.r.gid?'fixed':'rotate';
   },j>=0&&j!==b.i?n+' 本周换到这一格'+(old?'，'+old+' 换过去':''):'已排 '+n+(old?'（'+old+' 回到名单）':''),[b.key].concat(j>=0?[b.w.date+'|'+j]:[]));
 }
-document.addEventListener('pointerup',e=>endDrag(e,false));
-document.addEventListener('pointercancel',e=>endDrag(e,true));
 document.addEventListener('input',e=>{if(e.target.id==='tbText')batchPreview();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&drag&&drag.on){endDrag(e,true);}},true);
 document.addEventListener('dragstart',e=>{if(e.target.closest&&e.target.closest('[data-drag]'))e.preventDefault();});
