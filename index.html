@@ -526,7 +526,7 @@ button.is-error{animation:shake .42s cubic-bezier(.36,.07,.19,.97)}
 <div id="toast" class="toast" role="status"></div>
 <script id="saved-data" type="application/json">null</script>
 <script>
-const BUILD={"time":"2026-10-24T14:18:56.651Z","sha":"d827923+"};
+const BUILD={"time":"2026-10-24T14:26:16.458Z","sha":"daf4527+"};
 /* ---- engine.js ---- */
 /* ================= 排课引擎：数据模型、次数/轮次、自动排课、固定老师同步、校验 =================
    纯逻辑，不碰页面；浏览器里是全局 Engine，node 里 require 进来测试。
@@ -880,7 +880,7 @@ function roundSheets(st,dates){
   const rm=roundMap(st),hm=hoursMap(st);
   const isFixed=n=>(teacher(st,n)||{}).status==='fixed';
   const head=['序号','班级','晚修课室','上课时间'].concat(...weeks.map(w=>[md(w.date)+'\n上课教师',md(w.date)+'\n轮次',md(w.date)+'\n本晚/累计课时']));
-  const rows=[head],merges=[];let i=0;
+  const rows=[head],merges=[],heights={};let i=0;
   const colName=n=>{let x='';n++;while(n){const m=(n-1)%26;x=String.fromCharCode(65+m)+x;n=Math.floor((n-1)/26);}return x;};
   for(const g of st.groups){
     const ids=g.classIds.filter(id=>cls(st,id));if(!ids.length)continue;
@@ -894,6 +894,8 @@ function roundSheets(st,dates){
     const top=rows.length;
     ids.forEach((id,k)=>{
       const c=cls(st,id),tm=(st.times||[])[k];
+      /* 课时格是两行字：只有一个班（15 班）那一行要两行高，两个班合并的每行一行半，合起来也放得下 */
+      heights[rows.length]=ids.length>1?20:36;
       rows.push([++i,c.name,k?'':g.room||'',tm?tm[0]+'-'+tm[1]:''].concat(...per.map(x=>k?['','','']:x)));
     });
     if(ids.length>1)for(const ci of [2].concat(...weeks.map((w,j)=>[4+3*j,5+3*j,6+3*j])))
@@ -911,7 +913,7 @@ function roundSheets(st,dates){
     t2.push([n,isFixed(n)?'固定':'轮换',items.join('\n'),mh,hrs[n]||0,isFixed(n)?'—（固定不轮换）':'已上到第'+(cnt[n]||0)+'轮']);
   }
   return [
-    {name:'课表（含轮次课时）',rows,merges,widths:[6,26,10,13].concat(...weeks.map(()=>[10,9,16])),notes:ROUND_NOTES},
+    {name:'课表（含轮次课时）',rows,merges,heights,widths:[6,26,10,13].concat(...weeks.map(()=>[10,9,16])),notes:ROUND_NOTES},
     {name:'老师汇总',rows:t2,widths:[10,8,44,10,16,16],notes:ROUND_NOTES,styleOf:(r,c)=>c===2?4:2},
   ];
 }
@@ -997,7 +999,9 @@ function build(sheets,rows,widths){
       return `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${esc(v==null?'':v)}</t></is></c>`;
     };
     const cols=(sh.widths||[]).map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('');
-    const data=all.map((row,r)=>`<row r="${r+1}"${r===0?' ht="32" customHeight="1"':''}>${row.map((v,c)=>cell(v,r,c)).join('')}</row>`).join('');
+    /* heights：{行号(从0起): 磅数}，写死行高；手机和 WPS 不会按换行自动调高，第二行字会被挡住 */
+    const ht=r=>r===0?32:(sh.heights||{})[r];
+    const data=all.map((row,r)=>`<row r="${r+1}"${ht(r)?` ht="${ht(r)}" customHeight="1"`:''}>${row.map((v,c)=>cell(v,r,c)).join('')}</row>`).join('');
     const ncol=Math.max(1,...sh.rows.map(r=>r.length));
     const merges=(sh.notes||[]).map((t,i)=>`<mergeCell ref="A${noteStart+1+i}:${col(ncol-1)}${noteStart+1+i}"/>`).concat(sh.merges||[]);
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>${cols?'<cols>'+cols+'</cols>':''}<sheetData>${data}</sheetData>${merges.length?`<mergeCells count="${merges.length}">${merges.join('')}</mergeCells>`:''}</worksheet>`;
