@@ -646,21 +646,8 @@ function applyFixed(st,w){
 
 function shuffle(a,rng){for(let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 
-/* 指定同一组的几位老师排在相邻周：上一周 A 在这一组上了课，同组的 B 还没“跟上”（次数比 A 少），这一周就预约 B */
-function teamDue(st,date,cnt){
-  const out=[],prev=weekOf(st,addDays(date,-7));
-  if(!prev||prev.skip)return out;
-  const gids=[...new Set(Object.values(st.designate||{}))];
-  for(const gid of gids){
-    const names=Object.keys(st.designate).filter(n=>st.designate[n]===gid&&(teacher(st,n)||{}).status==='rotate');
-    if(names.length<2)continue;
-    const ra=prev.rows.find(r=>r.gid===gid&&names.includes(r.teacher));
-    if(!ra)continue;
-    const b=names.filter(n=>n!==ra.teacher&&!namesIn(prev).has(n)&&(cnt[n]||0)<(cnt[ra.teacher]||0))[0];
-    if(b)out.push({name:b,gid});
-  }
-  return out;
-}
+/* 指定了同一组班的几位轮换老师：不插队，跟大家一样按轮次排；轮到时进自己的组；同一周只排其中一位。
+   （以前会把搭档预约到下一周，等于让他们跳过同一轮里等得更久的人，学期末一轮没走完时不公平，已去掉） */
 
 /* 只上某些班（不是固定）：轮到时只排进含这些班的组 */
 /* 不能上课：每月几号所在的那一周（这一晚起往后 7 天里有这些号），或某几个具体日期 */
@@ -687,13 +674,6 @@ function generate(st,dates,opt={}){
     const {cnt,last}=tally(st,date);
     const used=namesIn(w);
     const free=()=>w.rows.filter(r=>!r.teacher);
-    /* 1. 同组相邻周的预约 */
-    for(const d of teamDue(st,date,cnt)){
-      const t=teacher(st,d.name);
-      if(!t||t.status!=='rotate'||used.has(d.name))continue;
-      const row=w.rows.find(r=>r.gid===d.gid&&!r.teacher);
-      if(row){row.teacher=d.name;row.kind='rotate';used.add(d.name);}
-    }
     /* 2. 轮换队列：次数少的先，次数一样看上次上课早晚，再一样随机。
           “轮到时带”的人先占自己的组；“只上某些班”的人占一个含这些班的空组，本周没有就跳过、下周优先；其余人随后随机分 */
     const pool=shuffle(st.teachers.filter(t=>t.status==='rotate'&&!used.has(t.name)&&!unavailable(st,t.name,date)).map(t=>t.name),rng)
