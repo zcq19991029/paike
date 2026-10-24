@@ -1290,7 +1290,17 @@ async function emailOf(id){
 async function signIn(id,password){const email=await emailOf(id);take(await api('/auth/v1/token?grant_type=password',{method:'POST',body:{email,password},auth:false}));}
 const recover=async id=>api('/auth/v1/recover?redirect_to='+encodeURIComponent(back()),{method:'POST',body:{email:await emailOf(id)},auth:false});
 /* 设密码：GitHub 登录的账号也能设，设完就能用“邮箱或账号名 + 密码”登录 */
-async function setPassword(password){session.user=await api('/auth/v1/user',{method:'PUT',body:{password,data:{has_password:true}}});keep(session);}
+async function setPassword(password){
+  try{session.user=await api('/auth/v1/user',{method:'PUT',body:{password,data:{has_password:true}}});keep(session);}
+  catch(e){
+    /* 和现在的密码一样：说明早就设好了，补上“已设置”标记，告诉用户不用再设 */
+    if(/different from the old password/i.test(e.raw||'')){
+      session.user=await api('/auth/v1/user',{method:'PUT',body:{data:{has_password:true}}});keep(session);
+      throw Object.assign(new Error('这个就是现在的密码，已经设好了，不用再设'),{same:true});
+    }
+    throw e;
+  }
+}
 const hasPassword=()=>!!(meta().has_password||providers().includes('email'));
 async function getUsername(){const r=await api('/rest/v1/paike_usernames?select=username&user_id=eq.'+user().id);return r[0]?r[0].username:'';}
 async function setUsername(name){
@@ -2117,7 +2127,7 @@ const ACT={
     if(v&&!/^[A-Za-z0-9_.-]{3,32}$/.test(v))return toast('账号名只能用字母、数字、下划线、点、横线，3～32 位');
     try{const n=await Cloud.setUsername(v);toast(n?'账号名已设为 '+n+(Cloud.hasPassword()?'':'，再设一个密码就能用账号名登录'):'已取消账号名');accountModal();}catch(e){toast(e.message);}},
   'pw-save':async()=>{const p=$('#pw1').value,q=$('#pw2').value;if(p.length<6)return toast('密码至少 6 位');if(p!==q)return toast('两次输入的不一样');
-    try{await Cloud.setPassword(p);toast('密码已保存，现在可以用账号名或邮箱 + 密码登录');accountModal();}catch(e){toast(e.message);}},
+    try{await Cloud.setPassword(p);toast('密码已保存，现在可以用账号名或邮箱 + 密码登录');accountModal();}catch(e){toast(e.message);if(e.same)accountModal();}},
   'logout':async()=>{if(Sync.dirty||Sync.busy){toast('还在同步，稍等几秒再退出');return Sync.push();}closeModal();await Cloud.signOut();try{localStorage.removeItem(cacheKey());}catch(e){}location.reload();},
   'first-blank':()=>{closeModal();Sync.push();toast('从空白开始：先去“班级与教室”添加班级和教室');setView({tab:'classes'});},
   'first-import':()=>{closeModal();$('#jsonFile').click();},
