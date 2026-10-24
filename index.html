@@ -63,7 +63,7 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
 
 /* 整体：左侧栏固定，主内容在右 */
 .app{position:relative;z-index:1;display:grid;grid-template-columns:236px minmax(0,1fr);min-height:100vh}
-.side{position:sticky;top:0;height:100vh;overflow-y:auto;overflow-x:hidden;padding:22px 14px 18px;display:flex;flex-direction:column;gap:22px;background:var(--side);backdrop-filter:saturate(180%) blur(24px);-webkit-backdrop-filter:saturate(180%) blur(24px);border-right:1px solid var(--hair);z-index:7}
+.side{position:sticky;top:0;height:100vh;height:100dvh;overflow-y:auto;overflow-x:hidden;padding:22px 14px 18px;display:flex;flex-direction:column;gap:22px;background:var(--side);backdrop-filter:saturate(180%) blur(24px);-webkit-backdrop-filter:saturate(180%) blur(24px);border-right:1px solid var(--hair);z-index:7}
 .brand{display:flex;align-items:center;gap:11px;padding:0 10px;font:700 16px/1.25 var(--font-d);letter-spacing:-.02em}
 .brand small{display:block;font:500 11.5px/1.4 var(--font);color:var(--mute);letter-spacing:.02em}
 .logo{width:34px;height:34px;flex:none;filter:drop-shadow(0 4px 10px rgba(47,107,255,.35))}
@@ -100,6 +100,21 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
 .eyebrow::before{content:"";width:6px;height:6px;border-radius:2px;background:var(--acc);box-shadow:0 0 10px var(--acc)}
 .page-h h1{font:700 34px/1.12 var(--font-d);letter-spacing:-.03em;margin:0 0 8px;text-wrap:balance;background:linear-gradient(100deg,var(--ink) 30%,var(--acc) 85%,var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
 .page-h p{margin:0;font-size:15px;color:var(--mute);max-width:760px}
+/* 平板横屏、笔记本这类矮屏：侧栏收紧，底部的账号、同步、版本、外观一屏放下 */
+@media(min-width:861px) and (max-height:900px){
+  .side{padding:16px 12px 12px;gap:14px}
+  .brand{font-size:15px}.logo{width:30px;height:30px}
+  #nav{gap:10px}
+  .nav-h{padding-bottom:4px}
+  .nav-i{padding:7px 12px}
+  .side-foot{gap:6px;line-height:1.5}
+  .side-note{display:none}
+}
+@media(min-width:861px) and (max-height:680px){
+  .nav-h{display:none}
+  #nav{gap:4px}
+  .brand small{display:none}
+}
 @media(max-width:860px){
   .app{grid-template-columns:1fr;grid-template-rows:auto 1fr}
   .side{position:sticky;top:0;height:auto;flex-direction:row;align-items:center;gap:8px;padding:8px 12px;overflow-x:auto;border-right:0;border-bottom:1px solid var(--hair)}
@@ -511,7 +526,7 @@ button.is-error{animation:shake .42s cubic-bezier(.36,.07,.19,.97)}
 <div id="toast" class="toast" role="status"></div>
 <script id="saved-data" type="application/json">null</script>
 <script>
-const BUILD={"time":"2026-10-24T13:14:21.319Z","sha":"39ee71e+"};
+const BUILD={"time":"2026-10-24T13:41:21.226Z","sha":"fe2aaf2+"};
 /* ---- engine.js ---- */
 /* ================= 排课引擎：数据模型、次数/轮次、自动排课、固定老师同步、校验 =================
    纯逻辑，不碰页面；浏览器里是全局 Engine，node 里 require 进来测试。
@@ -1626,7 +1641,7 @@ function mountShell(){
     <div class="side-foot">${ONLINE?'<div class="acct" id="acct"></div>':''}<div class="savedot" id="savedot"${ONLINE?' data-act="sync-check" role="button" tabindex="0"':''}><i></i><span>${ONLINE?'未登录':st.savedAt?'已自动保存':'数据存在本机'}</span></div>
       <div class="ver" id="ver" data-act="ver" role="button" tabindex="0"></div>
       <div class="themes" id="themes" role="group" aria-label="外观"><button type="button" data-theme-set="auto">自动</button><button type="button" data-theme-set="light">浅色</button><button type="button" data-theme-set="dark">深色</button></div>
-      <div>${ONLINE?'在线版 · 数据存在云端，按账号分开':'离线可用 · 纯本地运行'}</div></div>
+      <div class="side-note">${ONLINE?'在线版 · 数据存在云端，按账号分开':'离线可用 · 纯本地运行'}</div></div>
   </aside>
   <main class="main" id="main"></main></div>`;
   applyTheme(store.get(THEMEKEY)||'auto',false);
@@ -1817,7 +1832,7 @@ function lessonCard(w,i,rm){
         :`<span class="rd" title="轮换到第几轮">第${rm[d][r.teacher]}轮</span><span class="hr" title="到这一晚（含）为止共上的晚修课时">${HM[d][r.teacher]}课时</span>`}
       ${r.locked&&!w.history?svgI('lock','lk'):''}</div>
     <div class="l-row"><span class="tm">${TM(0)}</span><span class="cn">${h(r.b1)}</span></div>
-    ${r.b2?`<div class="l-row"><span class="tm">${TM(1)}</span><span class="cn">${h(r.b2)}</span></div>`:'<div class="l-row only"><span class="tm">${TM(1)}</span><span class="cn">（这间只有一节）</span></div>'}
+    ${r.b2?`<div class="l-row"><span class="tm">${TM(1)}</span><span class="cn">${h(r.b2)}</span></div>`:'<div class="l-row only"><span class="tm"></span><span class="cn">（这间只有一节）</span></div>'}
     <div class="l-room">${svgI('pin','ic12')}${h(r.room||'未定教室')}</div>
   </div>`;
 }
